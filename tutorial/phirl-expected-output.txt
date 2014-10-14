@@ -1,0 +1,224 @@
+1.000	1	 Chickamauga & Chattanooga NMP:d445	 Chickamauga & Chattanooga NMP:d72
+1.000	1	   George Washington Carver NM:d499	   George Washington Carver NM:d153
+1.000	1	    Salinas Pueblo Missions NM:d597	    Salinas Pueblo Missions NM:d329
+1.000	1	     Florissant Fossil Beds NM:d473	     Florissant Fossil Beds NM:d116
+1.000	1	       Hagerman Fossil Beds NM:d517	       Hagerman Fossil Beds NM:d177
+1.000	1	       Gila Cliff Dwellings NM:d502	       Gila Cliff Dwellings NM:d156
+1.000	1	       Booker T. Washington NM:d423	       Booker T. Washington NM:d38
+1.000	1	        Sleeping Bear Dunes NL:d607	        Sleeping Bear Dunes NL:d343
+1.000	1	        Klondike Gold Rush NHP:d543	        Klondike Gold Rush NHP:d218
+1.000	1	          Organ Pipe Cactus NM:d574	          Organ Pipe Cactus NM:d288
+1.000	1	          Kaloko-Honokohau NHP:d539	          Kaloko-Honokohau NHP:d211
+1.000	1	          Agate Fossil Beds NM:d637	          Agate Fossil Beds NM:d4
+1.000	1	           Petrified Forest NP:d580	           Petrified Forest NP:d297
+1.000	1	           Hawaii Volcanoes NP:d521	           Hawaii Volcanoes NP:d183
+1.000	1	           Great Sand Dunes NM:d511	           Great Sand Dunes NM:d170
+1.000	1	           Cuyahoga Valley NRA:d460	           Cuyahoga Valley NRA:d91
+1.000	1	           Buck Island Reef NM:d638	           Buck Island Reef NM:d45
+1.000	1	            Lassen Volcanic NP:d546	            Lassen Volcanic NP:d227
+1.000	1	            Horseshoe Bend NMP:d525	            Horseshoe Bend NMP:d190
+1.000	1	            Cumberland Gap NHP:d457	            Cumberland Gap NHP:d88
+1.000	1	            Blue Ridge Parkway:d421	            Blue Ridge Parkway:d36
+1.000	1	            Bighorn Canyon NRA:d418	            Bighorn Canyon NRA:d32
+1.000	1	             Pictured Rocks NL:d651	             Pictured Rocks NL:d299
+1.000	1	             Harpers Ferry NHP:d520	             Harpers Ferry NHP:d181
+1.000	1	             Fort Frederica NM:d479	             Fort Frederica NM:d123
+1.000	1	             Congaree Swamp NM:d451	             Congaree Swamp NM:d81
+1.000	1	              Walnut Canyon NM:d622	              Walnut Canyon NM:d375
+1.000	1	              Valley Forge NHP:d618	              Valley Forge NHP:d369
+1.000	1	              Mount Rainier NP:d558	              Mount Rainier NP:d258
+1.000	1	              Indiana Dunes NL:d530	              Indiana Dunes NL:d197
+1.000	1	              Independence NHP:d529	              Independence NHP:d196
+1.000	1	              Grand Portage NM:d507	              Grand Portage NM:d165
+1.000	1	              Gauley River NRA:d497	              Gauley River NRA:d149
+1.000	1	              Fort Matanzas NM:d482	              Fort Matanzas NM:d126
+1.000	1	              Effigy Mounds NM:d469	              Effigy Mounds NM:d106
+1.000	1	              Cape Hatteras NS:d431	              Cape Hatteras NS:d54
+1.000	1	               Scotts Bluff NM:d602	               Scotts Bluff NM:d338
+1.000	1	               Russell Cave NM:d593	               Russell Cave NM:d321
+1.000	1	               Kenai Fjords NP:d540	               Kenai Fjords NP:d213
+1.000	1	               Fossil Butte NM:d491	               Fossil Butte NM:d141
+1.000	1	               Fort Pulaski NM:d485	               Fort Pulaski NM:d131
+1.000	1	               Cedar Breaks NM:d639	               Cedar Breaks NM:d65
+1.000	1	               Cape Lookout NS:d433	               Cape Lookout NS:d56
+1.000	1	                Pipe Spring NM:d652	                Pipe Spring NM:d301
+1.000	1	                Morristown NHP:d556	                Morristown NHP:d257
+1.000	1	                Minute Man NHP:d553	                Minute Man NHP:d249
+1.000	1	                Joshua Tree NP:d537	                Joshua Tree NP:d209
+1.000	1	                Isle Royale NP:d531	                Isle Royale NP:d198
+1.000	1	                Grand Teton NP:d508	                Grand Teton NP:d166
+1.000	1	                Fort Sumter NM:d488	                Fort Sumter NM:d136
+1.000	1	                Aztec Ruins NM:d409	                Aztec Ruins NM:d22
+1.000	1	                 Mesa Verde NP:d552	                 Mesa Verde NP:d248
+1.000	1	                 Jewel Cave NM:d533	                 Jewel Cave NM:d202
+1.000	1	                 Fort Union NM:d489	                 Fort Union NM:d137
+1.000	1	                 El Malpais NM:d641	                 El Malpais NM:d109
+1.000	1	                 Curecanti NRA:d459	                 Curecanti NRA:d90
+1.000	1	                 Chiricahua NM:d447	                 Chiricahua NM:d75
+1.000	1	                 Chickasaw NRA:d446	                 Chickasaw NRA:d73
+1.000	1	                  Saratoga NHP:d601	                  Saratoga NHP:d336
+1.000	1	                  Pipestone NM:d582	                  Pipestone NM:d302
+1.000	1	                  Pinnacles NM:d581	                  Pinnacles NM:d300
+1.000	1	                  Lava Beds NM:d547	                  Lava Beds NM:d228
+1.000	1	                  Hovenweep NM:d527	                  Hovenweep NM:d192
+1.000	1	                  Colonial NHP:d449	                  Colonial NHP:d79
+1.000	1	                  Bandelier NM:d411	                  Bandelier NM:d24
+1.000	1	                   Tuzigoot NM:d615	                   Tuzigoot NM:d365
+1.000	1	                   Gateway NRA:d496	                   Gateway NRA:d148
+1.000	1	                   El Morro NM:d470	                   El Morro NM:d110
+1.000	1	                   Dinosaur NM:d467	                   Dinosaur NM:d101
+1.000	1	                   Coronado NM:d452	                   Coronado NM:d83
+1.000	1	                   Colorado NM:d450	                   Colorado NM:d80
+1.000	1	                   Chamizal NM:d442	                   Chamizal NM:d67
+1.000	1	                   Cape Cod NS:d430	                   Cape Cod NS:d53
+1.000	1	                   Cabrillo NM:d426	                   Cabrillo NM:d47
+1.000	1	                   Amistad NRA:d400	                   Amistad NRA:d10
+1.000	1	                    Wupatki NM:d631	                    Wupatki NM:d391
+1.000	1	                     Pecos NHP:d578	                     Pecos NHP:d293
+1.000	1	                     Navajo NM:d565	                     Navajo NM:d269
+1.000	1	                      Tonto NM:d614	                      Tonto NM:d360
+1.000	0	           Carlsbad Caverns NP:d437	           Carlsbad Caverns NP:d60
+1.000	0	           Cape Krusenstern NM:d432	           Cape Krusenstern NM:d55
+1.000	0	                Coulee Dam NRA:d453	                Coulee Dam NRA:d84
+1.000	0	                 Muir Woods NM:d560	                 Muir Woods NM:d260
+0.999	1	    Santa Monica Mountains NRA:d600	    Santa Monica Mountains NRA:d335
+0.999	1	      San Antonio Missions NHP:d598	      San Antonio Missions NHP:d331
+0.999	1	        Guadalupe Mountains NP:d514	        Guadalupe Mountains NP:d174
+0.999	1	          Cumberland Island NS:d458	          Cumberland Island NS:d89
+0.999	1	          Assateague Island NS:d408	          Assateague Island NS:d21
+0.999	1	           San Juan Island NHP:d599	           San Juan Island NHP:d333
+0.999	1	           Canyon de Chelly NM:d428	           Canyon De Chelly NM:d51
+0.999	1	            Apostle Islands NL:d404	            Apostle Islands NL:d15
+0.999	1	             Wilson's Creek NB:d627	             Wilson's Creek NB:d385
+0.999	1	             Rocky Mountain NP:d591	             Rocky Mountain NP:d317
+0.999	1	             Fort Necessity NB:d483	             Fort Necessity NB:d129
+0.999	1	              Fort Donelson NB:d478	              Fort Donelson NB:d122
+0.999	1	               Stones River NB:d609	               Stones River NB:d348
+0.999	1	               Padre Island NS:d576	               Padre Island NS:d290
+0.999	1	               Moores Creek NB:d555	               Moores Creek NB:d252
+0.999	1	               Mammoth Cave NP:d551	               Mammoth Cave NP:d241
+0.999	1	               Grand Canyon NP:d506	               Grand Canyon NP:d164
+0.999	1	               Glen Canyon NRA:d504	               Glen Canyon NRA:d159
+0.999	1	               Death Valley NP:d462	               Death Valley NP:d94
+0.999	1	               Bryce Canyon NP:d424	               Bryce Canyon NP:d44
+0.999	1	                Yucca House NM:d634	                Yucca House NM:d394
+0.999	1	                Yellowstone NP:d632	                Yellowstone NP:d392
+0.999	1	                Point Reyes NS:d583	                Point Reyes NS:d304
+0.999	1	                Great Basin NP:d510	                Great Basin NP:d168
+0.999	1	                Gettysburg NMP:d501	                Gettysburg NMP:d155
+0.999	1	                Fire Island NS:d472	                Fire Island NS:d115
+0.999	1	                Canyonlands NP:d429	                Canyonlands NP:d52
+0.999	1	                 Vicksburg NMP:d619	                 Vicksburg NMP:d371
+0.999	1	                 Shenandoah NP:d604	                 Shenandoah NP:d340
+0.999	1	                 Petersburg NB:d579	                 Petersburg NB:d296
+0.999	1	                 Lake Mead NRA:d545	                 Lake Mead NRA:d223
+0.999	1	                 Everglades NP:d471	                 Everglades NP:d113
+0.999	1	                  Wind Cave NP:d628	                  Wind Cave NP:d386
+0.999	1	                  Voyageurs NP:d621	                  Voyageurs NP:d374
+0.999	1	                  Haleakala NP:d518	                  Haleakala NP:d178
+0.999	1	                  Canaveral NS:d427	                  Canaveral NS:d49
+0.999	1	                   Yosemite NP:d633	                   Yosemite NP:d393
+0.999	1	                   Biscayne NP:d419	                   Biscayne NP:d33
+0.999	1	                   Big Bend NP:d414	                   Big Bend NP:d27
+0.999	1	                   Badlands NP:d410	                   Badlands NP:d23
+0.999	1	                   Antietam NB:d403	                   Antietam NB:d14
+0.999	1	                    Shiloh NMP:d605	                    Shiloh NMP:d341
+0.999	1	                    Redwood NP:d588	                    Redwood NP:d313
+0.999	1	                    Olympic NP:d572	                    Olympic NP:d285
+0.999	1	                    Glacier NP:d503	                    Glacier NP:d158
+0.999	1	                    Cowpens NB:d454	                    Cowpens NB:d85
+0.999	1	                     Arches NP:d406	                     Arches NP:d18
+0.999	1	                     Acadia NP:d397	                     Acadia NP:d2
+0.999	1	                       Zion NP:d636	                       Zion NP:d396
+0.998	1	Knife River Indian Villages NHS:d544	Knife River Indian Villages NHS:d219
+0.998	1	Allegheny Portage Railroad NHS:d398	Allegheny Portage Railroad NHS:d8
+0.998	1	     Castillo de San Marcos NM:d439	     Castillo de San Marcos NM:d62
+0.998	1	       John Day Fossil Beds NM:d534	       John Day Fossil Beds NM:d205
+0.998	1	        Delaware Water Gap NRA:d463	        Delaware Water Gap NRA:d97
+0.998	1	         Natchez Trace Parkway:d562	         Natchez Trace Parkway:d263
+0.998	1	           Montezuma Castle NM:d554	           Montezuma Castle NM:d255
+0.998	1	            Natural Bridges NM:d649	            Natural Bridges NM:d268
+0.998	1	            Channel Islands NP:d640	            Channel Islands NP:d68
+0.998	1	            Capulin Volcano NM:d435	            Capulin Volcano NM:d58
+0.998	1	             Virgin Islands NP:d620	             Virgin Islands NP:d373
+0.998	1	             Lake Meredith NRA:d647	             Lake Meredith NRA:d225
+0.998	1	               Golden Gate NRA:d505	               Golden Gate NRA:d161
+0.998	1	               Devils Tower NM:d466	               Devils Tower NM:d100
+0.998	1	                White Sands NM:d625	                White Sands NM:d382
+0.998	1	                Casa Grande NM:d438	                Casa Grande NM:d61
+0.997	1	George Washington Birthplace NM:d498	George Washington Birthplace NM:d152
+0.997	1	   Fort Union Trading Post NHS:d490	   Fort Union Trading Post NHS:d138
+0.997	1	    Prince William Forest Park:d584	    Prince William Forest Park:d308
+0.997	1	     Frederick Law Olmsted NHS:d642	     Frederick Law Olmsted NHS:d144
+0.997	1	      Hubbell Trading Post NHS:d528	      Hubbell Trading Post NHS:d193
+0.997	1	       Guilford Courthouse NMP:d515	       Guilford Courthouse NMP:d175
+0.997	1	         Lyndon B. Johnson NHP:d550	         Lyndon B. Johnson NHP:d237
+0.997	1	         Grant-Kohrs Ranch NHS:d509	         Grant-Kohrs Ranch NHS:d167
+0.997	1	           Whitman Mission NHS:d626	           Whitman Mission NHS:d383
+0.997	1	           Puukohola Heiau NHS:d586	           Puukohola Heiau NHS:d310
+0.997	1	           Bent's Old Fort NHS:d412	           Bent's Old Fort NHS:d25
+0.997	1	            Kings Mountain NMP:d542	            Kings Mountain NMP:d217
+0.997	1	            Herbert Hoover NHS:d522	            Herbert Hoover NHS:d184
+0.997	1	             North Cascades NP:d569	             North Cascades NP:d280
+0.997	1	              City of Rocks NR:d448	              City of Rocks NR:d77
+0.997	1	               Rock Creek Park:d590	               Rock Creek Park:d316
+0.997	1	                Ninety Six NHS:d650	                Ninety Six NHS:d277
+0.997	1	                Hot Springs NP:d526	                Hot Springs NP:d191
+0.997	1	                Greenbelt Park:d513	                Greenbelt Park:d172
+0.996	1	Black Canyon of the Gunnison NM:d420	Black Canyon of the Gunnison NM:d34
+0.996	1	 Little Bighorn Battlefield NM:d549	 Little Bighorn Battlefield NM:d233
+0.996	1	        Craters of the Moon NM:d456	        Craters of the Moon NM:d87
+0.996	1	         Kennesaw Mountain NBP:d541	         Kennesaw Mountain NBP:d214
+0.996	1	          Hopewell Furnace NHS:d524	          Hopewell Furnace NHS:d189
+0.996	1	             Sagamore Hill NHS:d653	             Sagamore Hill NHS:d322
+0.996	1	              Thomas Stone NHS:d612	              Thomas Stone NHS:d357
+0.996	1	                Fort Point NHS:d484	                Fort Point NHS:d130
+0.996	1	                Crater Lake NP:d455	                Crater Lake NP:d86
+0.995	1	             Chaco Culture NHP:d441	             Chaco Culture NHP:d66
+0.995	1	              Fort Laramie NHS:d480	              Fort Laramie NHS:d124
+0.995	1	               Saint Croix NSR:d595	               Saint Croix NSR:d325
+0.995	1	               Fort Larned NHS:d481	               Fort Larned NHS:d125
+0.995	1	                Fort Smith NHS:d487	                Fort Smith NHS:d134
+0.995	1	                Fort Scott NHS:d486	                Fort Scott NHS:d133
+0.995	1	                Fort Davis NHS:d477	                Fort Davis NHS:d121
+0.995	1	                Fort Bowie NHS:d474	                Fort Bowie NHS:d118
+0.995	1	                 John Muir NHS:d535	                 John Muir NHS:d207
+0.994	1	        Carl Sandburg Home NHS:d436	        Carl Sandburg Home NHS:d59
+0.994	1	         Theodore Roosevelt NP:d611	         Theodore Roosevelt NP:d354
+0.994	1	             Saint-Gaudens NHS:d596	             Saint-Gaudens NHS:d327
+0.994	1	                 Steamtown NHS:d608	                 Steamtown NHS:d347
+0.994	1	                   Hampton NHS:d519	                   Hampton NHS:d180
+0.992	1	               Oregon Caves NM:d573	               Oregon Caves NM:d286
+0.991	1	            New River Gorge NR:d566	            New River Gorge NR:d274
+0.988	1	George Washington Memorial Parkway:d500	George Washington Memorial Parkway:d154
+0.988	1	        American Memorial Park:d399	        American Memorial Park:d9
+0.942	1	            War in Pacific NHP:d623	        War in the Pacific NHP:d376
+0.923	1	                    Saguaro NM:d594	                    Saguaro NP:d323
+0.891	1	   Jean Lafitte NHP & Preserve:d532	      Jean Lafitte NHP & NPRES:d200
+0.891	1	                 Pea Ridge NMP:d577	                 Pea Ridge NHS:d292
+0.887	0	      Obed Wild & Scenic River:d570	    Obed Wild and Scenic River:d283
+0.884	1	             Andersonville NHP:d401	             Andersonville NHS:d11
+0.884	1	                     Sitka NHP:d606	                     Sitka NHS:d342
+0.870	1	Bering Land Bridge N. Preserve:d413	      Bering Land Bridge NPRES:d26
+0.868	1	     Sequoia & Kings Canyon NP:d603	   Sequoia and Kings Canyon NP:d339
+0.868	1	     Glacier Bay NP & Preserve:d643	        Glacier Bay NP & NPRES:d157
+0.866	1	          NP of American Samoa:d561	National Park Of American Samoa:d267
+0.859	1	                 Kalaupapa NHS:d538	                 Kalaupapa NHP:d210
+0.850	1	       Johnstown Flood N. Mem.:d536	            Johnstown Flood NM:d208
+0.842	1	      Lake Clark NP & Preserve:d646	         Lake Clark NP & NPRES:d222
+0.840	1	       Lincoln Boyhood N. Mem.:d548	            Lincoln Boyhood NM:d230
+0.840	1	       Homestead NM of America:d523	Homestead National Monument of America:d187
+0.839	1	      Sunset Crater Volcano NM:d610	              Sunset Crater NM:d349
+0.834	1	        Mount Rushmore N. Mem.:d559	             Mount Rushmore NM:d259
+0.831	0	         Theodore Roosevelt NP:d611	     Theodore Roosevelt Island:d353
+0.830	1	 Chesapeake and Ohio Canal NHP:d444	   Chesapeake & Ohio Canal NHP:d71
+0.825	1	         Arkansas Post N. Mem.:d407	              Arkansas Post NM:d19
+0.820	1	          Katmai NP & Preserve:d644	             Katmai NP & NPRES:d212
+0.820	1	          Denali NP & Preserve:d464	             Denali NP & NPRES:d98
+0.797	1	                  Aniakchak NM:d402	          Aniakchak NM & NPRES:d13
+0.784	1	       Big Thicket N. Preserve:d417	             Big Thicket NPRES:d31
+0.784	1	       Big Cypress N. Preserve:d415	             Big Cypress NPRES:d28
+0.782	1	         Fort Caroline N. Mem.:d475	              Fort Caroline NM:d119
+0.782	1	          Fort Clatsop N. Mem.:d476	               Fort Clatsop NM:d120
+0.768	1	                 Lake Mead NRA:d545	        Lake Mead NRA (Nevada):d224
+0.763	1	Upper Delaware Scenic & Rec. River:d617	Upper Delaware Scenic & Recreational River:d368

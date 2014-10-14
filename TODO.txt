@@ -1,0 +1,126 @@
+TODO - priorities
+
+for 1.3
+ - python wordprob.py --store prob seems to fail on a fresh tutorial	
+ - clean up null src issue - do I need it?
+ - test hadoop
+ - safer eval - test and document, strip out reprInverse
+
+FUNCTIONALITY
+
+ - add --dictSeps =, instead of default :,
+ - safer eval
+ - a GPig.registerImport('foo.py') - ok that's just ship? and GPig.registerCompiler('key',factoryClass)
+ - add --dictSeps =, instead of default :, for s3
+ - a GPig.registerImport('foo.py'), GPig.registerCompiler('key',factoryClass) - what is registerCompiler?
+ - option(storedIn=FILE) - so you can retrieve and store work on s3
+ - add Reuse(FILE) view
+ - add Concat(view1,....,viewK) 
+ - add Stream(view1, through='shell command', shipping=[f1,..,fk])
+ - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 
+
+ - extras, for debugging:
+ -- Log
+ -- ReadBlocks
+ -- Wrap
+ -- PPrint
+ -- Describe?
+ -- Illustrate?
+ --- standardize view.by argument
+
+ - efficiency
+ -- combiners
+ -- compression
+ -- hadoop options (parallel, etc)
+ -- compiler for marime.py map-reducer with ramdisks (note: diskutil erasevolume HFS+ 'RAMDisk' `hdiutil attach -nomount ram://10315776`,
+    size is in 2048-byte blocks)
+ -- clean up.gpmo and other tmp files? could do this via analysis at the AbstractMapReduceTask lst level
+
+DOCS:
+ - howto for EC2 EMR
+ - some longer examples for the tutorial (phirl-naive?)
+ - document planner.ship, planner.setReprInverseFun, planner.setSerializer 
+<<<<<<< TODO.txt
+=======
+ - clean up .gpmo and other tmp files?
+>>>>>>> 1.62
+
+NOTES - EC2
+
+  follow: /Users/wcohen/Documents/code/elastic-mapreduce-cli
+  installed on eddy in /Users/wcohen/Documents/code/elastic-mapreduce-cli, keypair=wcohen
+  buckets:  wcohen-gpig-input, wcohen-gpig-views
+  helpful: https://aws.amazon.com/articles/Elastic-MapReduce/3938
+
+  after installation:
+  $ ./elastic-mapreduce --create --alive --name "Testing streaming -- wcohen" --num-instances 5 --instance-type c1.medium
+  Created job flow j-1F8U85HWYBRBT
+  $ ./elastic-mapreduce --jobflow j-1F8U85HWYBRBT --put gpigtut.tgz 
+  $ ./elastic-mapreduce --jobflow j-1F8U85HWYBRBT --ssh
+  $ export GP_STREAMJAR=~/contrib/streaming/hadoop-streaming.jar
+  $  hadoop jar hadoop-examples.jar pi 10 10000000  #somehow this was needed to set up hdfs:/user/hadoop
+  # then I could copy data in from s3: by just reading it in a ReadLines view...
+
+  $ ./elastic-mapreduce --set-termination-protection false
+  $ ./elastic-mapreduce --terminate
+
+  # copying: see https://wiki.apache.org/hadoop/AmazonS3
+  % ${HADOOP_HOME}/bin/hadoop distcp hdfs://domU-12-31-33-00-02-DF:9001/user/nutch/0070206153839-1998 s3://123:456@nutch/
+
+
+TODO - MAJOR
+
+- test on EC2
+
+- multithreading ideas
+
+  1. for CPU intensive steps, include multithreaded ReplaceEach and Flatten ops,
+     which sets up a work queue, and for each row, adds a task, and
+     removes any completed tasks.
+
+  2. add another compiler, which generates marime/mime.py steps.
+
+  3. Implement: marime mr -m MAP -r RED -i IN -o OUT -k K 
+           and: marime putsplit -i IN -o OUT -k K
+	        marime getmerge -i IN -o OUT
+  where in and out are ramdisk directories
+
+  map setup if there are J files in I:
+    K queues, Qi for shard i - ie {k,v : H(k)%K == i}
+    J processes Pj, each will run 'MAP < in/shard.j | ...' -- or could use threads (subprocesses would be more modular)
+    J threads to read from Pj.stdout and route (k,v) to appropriate Qi
+    K threads, each to process inputs from one queue, into a shardBuffer
+
+  when all map processes are done:
+    K subprocesses, Ri, to run '... | RED > out/shard.k' -- or could use threads (subprocesses more modular)
+    K threads to print from the shardBuffer to Ri
+
+- benchmark hadoop stuff 
+  - working: time python phirl-naive.py --opts viewdir:/user/wcohen/gpig_views,target:hadoop --store flook | tee tmp.log (real	13m44.946s)
+   - benchmark vs PIG: pig took 8min, launched 14 jobs; guineapig took 13:45, launched 27 jobs.
+  - issues:
+   - problem: hdoop processes don't seem to know where the user home dir is, workaround is a rooted path,
+   but maybe that's ok (TODO: warn if target=hadoop and relative path)
+   - can't run a program in a subdirectory, eg python demo/phirl-naive.py ... TODO: look for guineapig.py on pythonpath.
+   or, maybe figure out how the -file option works better....
+
+ - COMBINERS: add combiner as combiningTo=.. option of Group.  
+
+ - DESCRIBE(...) - could be just a pretty_print?
+
+ - ILLUSTRATE(view,[outputs]) - using definition of view, select the
+   inputs from the innerviews that produce those outputs.  Then, do that
+   recursively to get a test case. 
+
+TODO - SMALL
+
+- add ReuseView(FILE) and option(location=FILE) so output views can be stored anywhere (eg s3 or s3n)
+- log created views so you can continue with --reuse `cat foo.log|grep ^created|cut -f2`
+- make safer version of 'eval'
+
+- add --hopts to pass in to hadoop?
+- maybe add --config logging:warn,...
+- clean .gpmo outputs?
+- find guineapig.py on sys.path
+- jobconf mapred.job.name="...."
+- compression jobconf mapred.output.compress=true -jobconf mapred.output.compression.codec=org.apache.hadoop.io.compress.GzipCode
