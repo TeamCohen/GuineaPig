@@ -13,7 +13,7 @@ clean:
 
 tar: update
 	echo created on `date` > marker.txt
-	tar -cvzf tutorial.tgz marker.txt guineapig.py *corpus.txt id-parks.txt *.py phirl-naive.pig
+	tar -cvzf tutorial.tgz README.txt marker.txt guineapig.py *corpus.txt id-parks.txt *.py phirl-naive.pig
 
 upload: tar
 	scp tutorial.tgz raff.ml.cmu.edu:~/afs-home/www/10-605/gpigtut.tgz
