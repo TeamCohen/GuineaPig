@@ -1,9 +1,10 @@
-For more information, see:
+Materials for tutorial on Guinea Pig. For more information, see:
 http://curtis.ml.cmu.edu/w/courses/index.php/Guinea_Pig
 
-There's also one larger example here, a soft-join program: phirl-naive.py.
+In addition to the tutorial materials, there's also one larger example
+here, a soft-join program: phirl-naive.py.
  
-The date this version was last modified is stored in the file marker.txt
+The date this version was last modified is stored in the file marker.txt.
 
 Recent changes:
 
@@ -17,3 +18,5 @@ Recent changes:
  guineapig1_2.py to the tutorial.
 
  10/9: added SafeEvaluator to 1.3.
+
+ 10/15: moved source control to git. Extended the documents.
