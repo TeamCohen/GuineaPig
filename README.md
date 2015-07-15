@@ -12,7 +12,7 @@ important differences.
 new stuff to learn.
 
 * Guinea Pig is simple.  Programs use only ten pre-defined classes
-(like _Join_ and _Flatten_), and the full implementation is less than 1000
+(like _Join_ and _Flatten_), and the full implementation is less than 1500
 non-comment-source lines.
 
 * Guinea Pig programs can be executed incrementally, and you can
