@@ -1,25 +1,20 @@
 update:
-	cp ../guineapig.py .
-	cp ../guineapig1_1.py .
-	cp ../guineapig1_2.py .
-	cp ../guineapig1_3.py .
-wc:
-	perl -ne 'print if /\S/ && !/^\#/' guineapig.py | wc
+	echo updates no longer needed
 
 clean:
 	rm -rf gpig_views
 	rm -f total.gp
 	rm *.pyc
 
-tar: update
+tar: 
+	cp ../guineapig.py .
 	echo created on `date` > marker.txt
-	tar -cvzf tutorial.tgz README.txt marker.txt guineapig.py *corpus.txt id-parks.txt *.py phirl-naive.pig
+	tar -cvzf tutorial.tgz marker.txt guineapig.py *corpus.txt id-parks.txt *.py phirl-naive.pig
 
 upload: tar
 	scp tutorial.tgz raff.ml.cmu.edu:~/afs-home/www/10-605/gpigtut.tgz
 
-all-runs: run-wordcount run-ntup-wordcount run-prefcount run-wordcmp run-wordprob run-multi run-phirl run-reuse check-phirl \
-	run-phirl1_3 check-phirl1_3
+all-runs: run-wordcount run-ntup-wordcount run-prefcount run-wordcmp run-wordprob run-multi run-phirl run-reuse check-phirl
 	echo all tests run, did you see any problems\?
 
 run-wordcount:
@@ -69,10 +64,6 @@ run-phirl:
 	sort -gr gpig_views/look.gp | head
 	sort -g gpig_views/look.gp | head
 
-run-phirl1_3:
-	python phirl-naive1_3.py --store look
-	sort -gr gpig_views/look.gp | head
-	sort -g gpig_views/look.gp | head
 
 run-reuse:
 	rm -f gpig_views/*.gp*
@@ -83,7 +74,4 @@ check-phirl: run-phirl
 	sort -gr gpig_views/look.gp > phirl-actual-output.txt
 	diff phirl-actual-output.txt phirl-expected-output.txt
 
-check-phirl1_3: run-phirl1_3
-	sort -gr gpig_views/look.gp > phirl-actual-output.txt
-	diff phirl-actual-output.txt phirl-expected-output.txt
 

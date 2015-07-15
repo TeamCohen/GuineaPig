@@ -24,37 +24,41 @@ class Phirl(Planner):
      | ReplaceEach(by=lambda((rel,term),df):(rel,term,df))
 
     #find total number of docs per relation
-    ndoc = ReplaceEach(data, by=lambda(rel,docid,term):(rel,docid)) | Distinct() | Group(by=lambda(rel,docid):rel, reducingTo=ReduceToCount())
+    ndoc = ReplaceEach(data, by=lambda(rel,docid,term):(rel,docid)) \
+           | Distinct() | Group(by=lambda(rel,docid):rel, reducingTo=ReduceToCount())
 
     #unweighted document vectors
-    
-    udocvec = Join( Jin(data,by=lambda(rel,docid,term):(rel,term)), Jin(docFreq,by=lambda(rel,term,df):(rel,term)) ) \
+    udocvec = Join( Jin(data,by=lambda(rel,docid,term):(rel,term)), 
+                    Jin(docFreq,by=lambda(rel,term,df):(rel,term)) ) \
         | ReplaceEach(by=lambda((rel,doc,term),(rel_,term_,df)):(rel,doc,term,df)) \
         | JoinTo( Jin(ndoc,by=lambda(rel,relCount):rel), by=lambda(rel,doc,term,df):rel ) \
         | ReplaceEach(by=lambda((rel,doc,term,df),(rel_,relCount)):(rel,doc,term,df,relCount)) \
         | ReplaceEach(by=lambda(rel,doc,term,df,relCount):(rel,doc,term,termWeight(relCount,df)))
 
+    #normalizers
     sumSquareWeights = ReduceTo(float, lambda accum,(rel,doc,term,weight): accum+weight*weight)
-
-    norm = Group( udocvec, by=lambda(rel,doc,term,weight):(rel,doc), reducingTo=sumSquareWeights) \
-        | ReplaceEach( by=lambda((rel,doc),z):(rel,doc,z))
+    norm = Group( udocvec, 
+                  by=lambda(rel,doc,term,weight):(rel,doc), 
+                  retaining = lambda (rel,doc,term,weight): weight,
+                  reducingTo=ReduceToSum() ) \
+           | ReplaceEach( by=lambda((rel,doc),z):(rel,doc,z))
 
     #normalized document vector
-    docvec = Join( Jin(norm,by=lambda(rel,doc,z):(rel,doc)), Jin(udocvec,by=lambda(rel,doc,term,weight):(rel,doc)) ) \
+    docvec = Join( Jin(norm,by=lambda(rel,doc,z):(rel,doc)), 
+                   Jin(udocvec,by=lambda(rel,doc,term,weight):(rel,doc)) ) \
         | ReplaceEach( by=lambda((rel,doc,z),(rel_,doc_,term,weight)): (rel,doc,term,weight/math.sqrt(z)) )
-
-    # grab only the p component and reduce it
-    sumOfP = ReduceTo(float,lambda accum,(doc1,doc2,p): accum+p)
 
     # naive algorithm: use all pairs for finding matches
     rel1Docs = Filter(docvec, by=lambda(rel,doc,term,weight):rel=='icepark')
     rel2Docs = Filter(docvec, by=lambda(rel,doc,term,weight):rel=='npspark')
-    softjoin = Join( Jin(rel1Docs,by=lambda(rel,doc,term,weight):term), Jin(rel2Docs,by=lambda(rel,doc,term,weight):term)) \
-        | ReplaceEach(by=lambda((rel1,doc1,term,weight1),(rel2,doc2,term_,weight2)): (doc1,doc2,weight1*weight2)) \
-        | Group(by=lambda(doc1,doc2,p):(doc1,doc2), reducingTo=sumOfP) \
+    softjoin = Join( Jin(rel1Docs,by=lambda(rel,doc,term,weight):term), 
+                     Jin(rel2Docs,by=lambda(rel,doc,term,weight):term)) \
+        | ReplaceEach(by=lambda((rel1,doc1,term,weight1),(rel2,doc2,term2,weight2)): (doc1,doc2,weight1*weight2)) \
+        | Group(by=lambda(doc1,doc2,p):(doc1,doc2), \
+                retaining=lambda(doc1,doc2,p):p, \
+                reducingTo=ReduceToSum()) \
         | ReplaceEach(by=lambda((doc1,doc2),sim):(doc1,doc2,sim))
 
-    # get the top few similar pairs
     simpairs = Filter(softjoin, by=lambda(doc1,doc,sim):sim>0.75)
 
     # diagnostic output

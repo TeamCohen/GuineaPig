@@ -1,4 +1,4 @@
-from guineapig1_3 import *
+from guineapig import *
 import sys
 import math
 import collections

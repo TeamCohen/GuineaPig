@@ -1,5 +1,5 @@
 ##############################################################################
-# (C) Copyright 2014 William W. Cohen.  All rights reserved.
+# (C) Copyright 2014, 2015 William W. Cohen.  All rights reserved.
 ##############################################################################
 
 import sys
@@ -10,6 +10,7 @@ import collections
 import os
 import os.path
 import urlparse
+import urllib
 import getopt
 import csv
 
@@ -20,11 +21,16 @@ import csv
 class GPig(object):
     """Collection of utilities for Guinea Pig."""
 
-    HADOOP_LOC = 'hadoop'  #assume hadoop is on the path at planning time
-    MY_LOC = 'guineapig.py'
+    SORT_COMMAND = 'LC_COLLATE=C sort'  # use standard ascii ordering, not locale-specific one
+    HADOOP_LOC = 'hadoop'               # assume hadoop is on the path at planning time
+    MY_LOC = 'guineapig.py'             # the name of this file
+    VERSION = '1.3.2'
+    COPYRIGHT = '(c) William Cohen 2014,2015'
 
-    #global options for Guinea Pig can be passed in with the --opts
+    #Global options for Guinea Pig can be passed in with the --opts
     #command-line option, and these are the default values
+    #The location of the streaming jar is a special case,
+    #in that it's also settable via an environment variable.
     defaultJar = '/usr/lib/hadoop/contrib/streaming/hadoop-streaming-1.2.0.1.3.0.0-107.jar'
     envjar = os.environ.get('GP_STREAMJAR', defaultJar)
     DEFAULT_OPTS = {'streamJar': envjar,
@@ -33,15 +39,18 @@ class GPig(object):
                     'echo':0,
                     'viewdir':'gpig_views',
                     }
-    #there are the types of each option that has a non-string value
+    #These are the types of each option that has a non-string value
     DEFAULT_OPT_TYPES = {'parallel':int,'echo':int}
-    #we need to pass non-default options in to mappers and reducers,
-    #but since the remote worker's environment can be different, we
-    #also need to pass in options computed from the environment
+    #We need to pass non-default options in to mappers and reducers,
+    #but since the remote worker's environment can be different that
+    #the environment of this script, we also need to pass in options
+    #computed from the environment
     COMPUTED_OPTION_DEFAULTS = {'streamJar':defaultJar}
 
     @staticmethod
     def getCompiler(target):
+        """Return the compiler object used to convert AbstractMapReduceTasks
+        to executable commands."""
         if target=='shell': return ShellCompiler()
         elif target=='hadoop': return HadoopCompiler()
         else: assert 'illegal compilation target '+target
@@ -67,12 +76,15 @@ class GPig(object):
         for i,a in enumerate(sys.argv):
             if a==optname:
                 paramString = sys.argv[i+1]
-                return dict(pair.split(":") for pair in paramString.split(","))
+                result = dict(pair.split(":") for pair in paramString.split(","))
+                for key in result:
+                    result[key] = urllib.unquote(result[key])
+                return result
         return {}
 
     @staticmethod
     def rowsOf(view):
-        """Iterate over the rows in a view."""
+        """Iterator over the rows in a view."""
         for line in open(view.distributableFile()):
             yield view.planner._serializer.fromString(line.strip())
 
@@ -103,6 +115,9 @@ class Jin(object):
         self.view = view
         self.joinBy = by
         self.outer = outer
+        #To implement the semantics for outer joins, if one Jin input
+        #for a join is outer, then the other inputs will be marked as
+        #_padWithNulls==True
         self._padWithNulls = False
 
     def __str__(self):
@@ -112,8 +127,11 @@ class Jin(object):
         return "Jin(%s,by=%s%s%s)" % (viewStr,self.joinBy,outerStr,padStr)
 
 class ReduceTo(object):
-    """An object x that can be the argument of a reducingTo=x
-    parameter in a Group view."""
+    """An object x that can be the argument of a reducingTo=x parameter in
+    a Group view.  Basetype is a function f such that f() returns the
+    initial value of the accumuator, and 'by' is a function that
+    maps one accumulator and a single new value to the next accumulator.  
+    """
     def __init__(self,baseType,by=lambda accum,val:accum+val):
         self.baseType = baseType
         self.reduceBy = by
@@ -124,8 +142,8 @@ class ReduceToCount(ReduceTo):
         ReduceTo.__init__(self,int,by=lambda accum,val:accum+1)
 
 class ReduceToSum(ReduceTo):
-    """Produce the sum of the objects - which must be numbers - that would
-    be placed in a group."""
+    """Produce the sum of the objects - which must be legal arguments of
+    the '+' function - that would be placed in a group."""
     def __init__(self):
         ReduceTo.__init__(self,int,by=lambda accum,val:accum+val)
 
@@ -408,7 +426,7 @@ class MapReduce(View):
                     inner.storeMe = True
 
     def mapPlan(self):
-        log.error("abstract method not implemented")
+        logging.error("abstract method not implemented")
         
     def doStoreKeyedRows(self,subview,key,index):
         """Utility method used by concrete map-reduce classes to compute keys
@@ -445,6 +463,9 @@ class ReuseView(Reader):
         for line in sys.stdin:
             yield self.planner._serializer.fromString(line.strip())
 
+    def explanation(self):
+        return [ 'reuse view %s stored in %s' % (self.reusedViewTag,self.src)]
+
     def __str__(self):
         return 'ReuseView("%s")' % self.src + self.showExtras()
 
@@ -462,21 +483,6 @@ class ReadLines(Reader):
     def __str__(self):
         return 'ReadLines("%s")' % self.src + self.showExtras()
 
-class ReadCSV(Reader):
-    """ Returns the lines in a CSV file, converted to Python tuples."""
-
-    def __init__(self,src,**kw):
-        Reader.__init__(self,src)
-        self.kw = kw
-
-    def rowGenerator(self):
-        for tup in csv.reader(sys.stdin,**self.kw):
-            yield tup
-
-    def __str__(self):
-        return 'ReadCVS("%s",%s)' % (self.src,str(self.kw)) + self.showExtras()
-
-
 class ReplaceEach(Transformation):
     """ In 'by=f'' f is a python function that takes a row and produces
     its replacement."""
@@ -490,10 +496,13 @@ class ReplaceEach(Transformation):
             yield self.replaceBy(row)
 
     def explanation(self):
-        return self.inner.explanation() + [ 'replaced to %s' % self.tag ]
+        return self.inner.explanation() + [ 'replace to %s' % self.tag ]
 
     def __str__(self):
         return 'ReplaceEach(%s, by=%s)' % (View.asTag(self.inner),str(self.replaceBy)) + self.showExtras()
+
+class Map(ReplaceEach):
+    """ Alternate name for ReplaceEach"""
 
 class Augment(Transformation):
 
@@ -565,6 +574,9 @@ class Flatten(Transformation):
 
     def __str__(self):
         return 'Flatten(%s, by=%s)' % (View.asTag(self.inner),str(self.flattenBy)) + self.showExtras()
+
+class FlatMap(Flatten):
+    """ Alternate name for Flatten"""
 
 class Filter(Transformation):
     """Filter out a subset of rows that match some predicate."""
@@ -762,6 +774,56 @@ class JoinTo(Join):
         self.joinInputs[0].view = otherView
         self.inners[0] = otherView
 
+class Union(MapReduce):
+    """Combine two or more relations, also removing duplicates."""
+
+    def __init__(self,*inners):
+        #sets self.inners
+        MapReduce.__init__(self,list(inners),None)
+
+    def acceptInnerView(self,otherView):
+        assert False, 'Union cannot be RHS of a pipe - use UnionTo instead'
+
+    def mapPlan(self):
+        plan = Plan()
+        innerCheckpoints = map(lambda v:v.checkpoint(), self.inners)
+        step = PrereduceStep(view=self, whatToDo='doUnionMap',srcs=innerCheckpoints,dst=self.checkpoint(),why=self.explanation())
+        plan.append(step)
+        return plan
+
+    def explanation(self):
+        innerEx = []
+        for inner in self.inners:
+            if innerEx: innerEx += ['CONCAT TO']
+            innerEx += inner.explanation()
+        return innerEx
+
+    def __str__(self):
+        return "Union(%s)" % ",".join(map(str,self.inners)) + self.showExtras()
+
+    def rowGenerator(self):
+        lastLine = None
+        for line in sys.stdin:
+            if line!=lastLine:
+                yield self.planner._serializer.fromString(line.strip())
+            lastLine = line
+
+    def doUnionMap(self,i):
+        # called with argument index, and stdin pointing to innerCheckpoints[index]
+        for row in self.inners[i].rowGenerator():
+            print self.planner._serializer.toString(row)
+
+
+class UnionTo(Union):
+    """Special case of Union which can be used as RHS of a pipe operator."""
+    
+    def __init__(self,*moreInners):
+        allInners = [None]+list(moreInners)
+        Union.__init__(self,*allInners)
+        
+    def acceptInnerView(self,otherView):
+        self.inners[0] = otherView
+
 ##############################################################################
 #
 # the top-level planner, and its supporting classes
@@ -803,16 +865,12 @@ class Plan(object):
         script = []
         taskCompiler = GPig.getCompiler(gp.opts['target']) 
         for task in self.tasks:
+            #print 'compiling',task
             script += taskCompiler.compile(task,gp)
         return script
 
-#
-# a single step in a plan produced by the planner
-#
-
 class Step(object):
-    """A single step of the plans produced by the planner, along with the
-    methods to convert the plans into executable shell commands."""
+    """A single 'step' of the plans produced by the planner."""
 
     def __init__(self,view):
         self.view = view
@@ -852,6 +910,7 @@ class TransformStep(Step):
         return "TransformStep("+",".join(map(repr, [self.view.tag,self.whatToDo,self.srcs,self.dst,self.reused]))+")"
 
 class PrereduceStep(Step):
+    """A step that can be followed by a reduce step."""
     def __init__(self,view,whatToDo,srcs,dst,why):
         Step.__init__(self,view)
         self.whatToDo = whatToDo
@@ -862,11 +921,22 @@ class PrereduceStep(Step):
     def __str__(self):
         return "PrereduceStep("+",".join(map(repr, [self.view.tag,self.whatToDo,self.srcs,self.dst,self.reused]))+")"
 
-# combine steps into something executable via hadoop - or shell
-
 class AbstractMapReduceTask(object):
-    """A collection of steps that can be executed as a single map-reduce operation,
-    possibly with some file managements steps to set up the task."""
+    """A collection of steps that can be executed as a single map-reduce
+    operation, possibly with some file managements steps to set up the
+    task.  More specifically, this consists of 
+
+    1a) a maybe-empty sequence of DistributeStep's
+    2a) a PrereduceStep followed by a TransformStep
+    or else
+
+    1b) a maybe-empty sequence of DistributeStep's
+    2b) a PrereduceStep
+    3b) a TransformStep
+
+    Sequence 1a-2a is a map-only task, and sequence 1b-3b is a
+    map-reduce task.
+    """
 
     def __init__(self):
         self.distributeSteps = []
@@ -880,16 +950,39 @@ class AbstractMapReduceTask(object):
             self.distributeSteps.append(step)
             return True
         elif self.mapStep==None and (isinstance(step,TransformStep) or isinstance(step,PrereduceStep)):
-            #we can only have one map step, so fill up an empty slot if possible
+            #we can only have one map step, so fill up an empty mapstep slot if possible
             self.mapStep = step
             return True
         elif self.mapStep and isinstance(self.mapStep,PrereduceStep) and isinstance(step,TransformStep) and not self.reduceStep:
-            #if the mapstep is a prereduce, then we can also allow a reduce step
+            #if the mapstep is a prereduce, then we can also allow any TransformStep to be used as a reduceStep
             self.reduceStep = step
             return True
         else:
             return False
             
+    def explanation(self):
+        """Concatenate together the explanations for the different steps of
+        2this task."""
+        buf = []
+        for step in self.distributeSteps:
+            buf += step.why
+        #reduce explanation copies the map explanation so we don't need both
+        if self.reduceStep:
+            buf += self.reduceStep.why
+        else:
+            buf += self.mapStep.why
+        return buf
+
+    def inputsAndOutputs(self):
+        """Return a string summarizing the source files used as inputs, and
+        the view ultimately created by this task."""
+        buf = ' + '.join(self.mapStep.srcs)
+        if self.reduceStep:
+            buf += ' => ' + self.reduceStep.view.tag
+        else:
+            buf += ' => ' + self.mapStep.view.tag            
+        return buf
+
     def __str__(self):
         buf = "mapreduce task:"
         for step in self.distributeSteps:
@@ -900,6 +993,7 @@ class AbstractMapReduceTask(object):
         return buf
 
 class MRCompiler(object):
+
     """Abstract compiler class to convert a task to a list of commands that can be executed by the shell."""
 
     def compile(self,task,gp):
@@ -909,25 +1003,25 @@ class MRCompiler(object):
             script += ['echo create '+task.mapStep.view.tag + ' via map: ' + task.mapStep.explain()]        
         else: 
             script += ['echo create '+task.reduceStep.view.tag +' via map/reduce: '+task.reduceStep.explain()]
-        for step in task.distributeSteps:
-            localCopy = step.view.distributableFile()                
-            maybeRemoteCopy = step.view.storedFile()
-            echoCom = 'echo distribute %s: making a local copy of %s in %s' % (step.view.tag,maybeRemoteCopy,localCopy)
-            script += [echoCom] + self.distributeCommands(task, gp, maybeRemoteCopy,localCopy)
-        if not task.reduceStep and len(task.mapStep.srcs)==1:
+        if not task.reduceStep and len(task.mapStep.srcs)==1:   #a map-only step
             mapCom = self._coreCommand(task.mapStep,gp)
             script += self.simpleMapCommands(task, gp, mapCom, task.mapStep.srcs[0], task.mapStep.dst)
-        elif task.reduceStep and len(task.mapStep.srcs)==1:
+        elif task.reduceStep and len(task.mapStep.srcs)==1:     #a map-reduce step
             mapCom = self._coreCommand(task.mapStep,gp)
             reduceCom = self._coreCommand(task.reduceStep,gp)
             script += self.simpleMapReduceCommands(task, gp, mapCom, reduceCom, task.mapStep.srcs[0], task.reduceStep.dst)
-        elif task.reduceStep and len(task.mapStep.srcs)>1:
+        elif task.reduceStep and len(task.mapStep.srcs)>1:      #multiple mappers and one reduce 
             mapComs = [self._ithCoreCommand(task.mapStep,gp,i) for i in range(len(task.mapStep.srcs))]
             reduceCom = self._coreCommand(task.reduceStep,gp)
             midpoint = gp.opts['viewdir']+'/'+task.mapStep.view.tag+'.gpmo'
             script += self.joinCommands(task, gp, mapComs, reduceCom, task.mapStep.srcs, midpoint, task.reduceStep.dst)
         else:
             assert False,'cannot compile task '+str(task)
+        for step in task.distributeSteps:                       #distribute the results, if necessary
+            localCopy = step.view.distributableFile()                
+            maybeRemoteCopy = step.view.storedFile()
+            echoCom = 'echo distribute %s: making a local copy of %s in %s' % (step.view.tag,maybeRemoteCopy,localCopy)
+            script += [echoCom] + self.distributeCommands(task, gp, maybeRemoteCopy,localCopy)
         return script
 
     # abstract routines
@@ -969,7 +1063,7 @@ class MRCompiler(object):
         for (k,v) in gp.opts.items():
             #pass in non-default options, or options computed from the environment
             if (gp.opts[k] != GPig.DEFAULT_OPTS[k]) or ((k in GPig.COMPUTED_OPTION_DEFAULTS) and (gp.opts[k] != GPig.COMPUTED_OPTION_DEFAULTS[k])):
-                nonDefaults += ["%s:%s" % (k,str(v))]
+                nonDefaults += ["%s:%s" % (k,urllib.quote(str(v)))]
         optsOpts = '' if not nonDefaults else " --opts " + ",".join(nonDefaults)
         reuseOpts = '' if not step.reused else " --reuse "+ " ".join(step.reused)
         return paramOpts  + optsOpts + reuseOpts
@@ -989,14 +1083,14 @@ class ShellCompiler(MRCompiler):
         
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
         """A map-reduce job with one input."""
-        return [mapCom + ' < ' + src + ' | sort -k1 | '+reduceCom + ' > ' + dst]
+        return [mapCom + ' < ' + src + (' | %s -k1 | ' % GPig.SORT_COMMAND) +reduceCom + ' > ' + dst]
 
     def joinCommands(self,task,gp,mapComs,reduceCom,srcs,midpoint,dst):
         """A map-reduce job with several inputs."""
         subplan = ['rm -f %s' % midpoint]
         for i,ithMapCom in enumerate(mapComs):
             subplan += [ithMapCom + ' < ' + srcs[i] + ' >> ' + midpoint]
-        subplan += [ 'sort -k1,2  < ' + midpoint + ' | ' + reduceCom + ' > ' + dst]
+        subplan += [ ('%s -k1,2  < '% GPig.SORT_COMMAND) + midpoint + ' | ' + reduceCom + ' > ' + dst]
         return subplan
 
 class HadoopCompiler(MRCompiler):
@@ -1078,7 +1172,10 @@ class HadoopCompiler(MRCompiler):
 #
 
 class RowSerializer(object):
-    """Saves row objects to disk and retrieves them."""
+    """Saves row objects to disk and retrieves them.  A RowSerializer is
+    used internally in a Planner, and by default the one used by a
+    Planner will be an instance of RowSerializer().  A user can
+    override this with planner.setSerializer(). """
     def __init__(self):
         self.evaluator = GPig.SafeEvaluator()
     def toString(self,x): 
@@ -1095,38 +1192,47 @@ class Planner(object):
 
     def __init__(self,**kw):
 
-        #parameters are used for programmatically give user-defined
+        #Parameters are used for programmatically giving user-defined
         #config information to a planner, or they can be specified in
-        #the command-line
+        #the command-line.  These are usually accessed in user-defined
+        #views.
+
         self.param = kw
         for (key,val) in GPig.getArgvParams().items():
                 # don't override non-null values specified in the constructor
                 if self.param.get(key)==None:
                     self.param[key] = val
 
-        #opts are used for giving options to the planner from the shell
+        #opts are used for giving options to the planner from the
+        #shell, and are used in code in this file.
+
         self.opts = GPig.getArgvOpts()
         for (key,val) in GPig.DEFAULT_OPTS.items():
             if (not key in self.opts): self.opts[key] = val
         for (key,type) in GPig.DEFAULT_OPT_TYPES.items():
             self.opts[key] = type(self.opts[key])
 
-        #use appropriate for the target
+        #Provide a default serializer
+
         self._serializer = RowSerializer()
 
-        #views that aren't associated with class variable, but are
-        #instead named automatically - ie, inner views with no
+        #These are views that aren't associated with class variable,
+        #but are instead named automatically - ie, inner views with no
         #user-provided names.
         self._autoNamedViews = {}
 
-        #by default, use info-level logging at planning time
+        #By default, use info-level logging at planning time only, not
+        #at view execution time.
         if not Planner.partOfPlan(sys.argv): 
             logging.basicConfig(level=logging.INFO)
+        logging.info('GuineaPig v%s %s' % (GPig.VERSION,GPig.COPYRIGHT))
 
-        #hadoop needs to know where to give the main script file,
-        #as well as the guineapig.py file it uses
+        #Hadoop needs to know where to give the main script file, as
+        #well as the guineapig.py file used here
+        self._shippedFiles = []
         self._gpigSourceFile = sys.argv[0]
-        self._shippedFiles = [GPig.MY_LOC,self._gpigSourceFile]
+        self.ship(GPig.MY_LOC)
+        self.ship(self._gpigSourceFile)
 
     def setup(self):
         """Initialize planner, and views used by the planner.  This has to be
@@ -1264,9 +1370,16 @@ class Planner(object):
     # dealing with the file storage system and related stuff
     #
 
-    def ship(self,*fileNames):
+    def ship(self,fileName):
         """Declare a set of inputs to be 'shipped' to the hadoop cluster."""
-        self._shippedFiles += fileNames
+        for d in sys.path:
+            location = os.path.join(d,fileName)
+            if os.path.isfile(location):
+                logging.info('located %s at %s' % (fileName,location))
+                self._shippedFiles.append(location)
+                return
+        logging.error("didn't locate %s on sys.path: path is %r" % (fileName,sys.path))
+        logging.warn("note that the working directory . should always be on your PYTHONPATH")
 
     def setSerializer(self,serializer):
         """Replace the default serializer another RowSerializer object."""
@@ -1294,12 +1407,17 @@ class Planner(object):
         self.runMain(argv)
 
     def runMain(self,argv):
+        """Called by main()."""
 
         # parse the options and dispatch appropriately
-        argspec = ["store=", "cat=", "reuse", 
+        argspec = ["store=", "cat=", "reuse", "help",
                    "list", "pprint=", "steps=", "tasks=", "plan=", 
                    "params=", "opts=", "do=", "view="]
-        optlist,args = getopt.getopt(argv[1:], 'x', argspec)
+        try:
+            optlist,args = getopt.getopt(argv[1:], 'x', argspec)
+        except getopt.GetoptError:
+            logging.fatal('bad option: use "--help" to get help')
+            sys.exit(-1)
         optdict = dict(optlist)
         
         # decide what views can be re-used, vs which need fresh plans
@@ -1329,12 +1447,21 @@ class Planner(object):
             for s in plan.steps:
                 print ' -',s
             return
-        elif '--tasks' in optdict: #print AbstractMapReduceTasks to produce a view 
+        elif '--tasks' in optdict: #print AbstractMapReduceTasks 
             rel = self.getView(optdict['--tasks'],mustExist=True)
             plan = rel.storagePlan()
             plan.buildTasks()
-            for t in plan.tasks:
-                print t
+            for k,task in enumerate(plan.tasks):
+                print '=' * 70
+                taskType = 'map-reduce' if task.reduceStep else 'map-only'
+                print '%s task %d: %s' % (taskType,(k+1),task.inputsAndOutputs())
+                print ' - +' + '-' * 20, 'explanation', '-' * 20
+                for w in task.explanation():
+                    print ' - | ',w
+                print ' - +' + '-' * 20, 'commands', '-' * 20
+                for c in GPig.getCompiler(self.opts['target']).compile(task,self):
+                    if not c.startswith("echo"):
+                        print ' - | ',c
             return
         elif '--plan' in optdict:    #print a storage plan
             rel = self.getView(optdict['--plan'],mustExist=True)
@@ -1373,12 +1500,31 @@ class Planner(object):
                 whatToDoMethod(arg)                
             return
         else:
-            print 'usage: --[store|pprint|steps|plan|cat] view [--opts key:val,...] [--params key:val,...] --reuse view1 view2 ...]'
-            print '       --[list]'
-            print 'current legal keys for "opts", with default values:'
+            usageHint = {'pprint':'print the data structure associated with the VIEW',
+                         'tasks':'print the abstract map-reduce tasks needed to materialize the VIEW',
+                         'plan':'print the commands that invoke each abstract map-reduce task',
+                         'store':'materialize the named VIEW and store it in the view directory',
+                         'cat': 'store the VIEW and then print each line to stdout'}
+            print 'Guinea Pig',GPig.VERSION,GPig.COPYRIGHT
+            print 'usage: python %s --(store|pprint|tasks|plan|cat) VIEW [OPTIONS] [PARAMS] --reuse VIEW1 VIEW2 ...' % sys.argv[0]
+            print '       python %s --list' % sys.argv[0]
+            print ''
+            print 'Subcommands that take a VIEW as argument:'
+            for a in usageHint:
+                print ' --%s VIEW: %s'% (a,usageHint[a])
+            print 'The --list subcommand lists possible VIEWs defined by this program.'
+            print ''
+            print 'OPTIONS are specified as "--opts key:value,...", where legal keys for "opts", with default values, are:'
             for (key,val) in GPig.DEFAULT_OPTS.items():
                 print '  %s:%s' % (key,str(val))
+            print 'Values in the "opts" key/value pairs are assumed to be URL-escaped.'
+            print ''
+            print 'PARAMS are specified as "--params key:value,..." and the associated dictionary is accessible to' 
+            print 'user programs via the function GPig.getArgvParams().'
+            print ''
             print 'There\'s more help at http://curtis.ml.cmu.edu/w/courses/index.php/Guinea_Pig'
 
 if __name__ == "__main__":
+    print 'Guinea Pig',GPig.VERSION,GPig.COPYRIGHT
     print 'There\'s help at http://curtis.ml.cmu.edu/w/courses/index.php/Guinea_Pig'    
+

@@ -1,5 +1,5 @@
 # always start like this
-from guineapig1_3 import *
+from guineapig import *
 import sys
 
 # supporting routines can go here

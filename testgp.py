@@ -11,22 +11,21 @@ class Wrap(View):
     def __init__(self,dataSource):
         View.__init__(self)
         self.dataSource = dataSource
-        self.storeMe = True
-    def unstoredCheckpoint(self):
-        return None
-    def unstoredCheckpointPlan(self):
+    def checkpoint(self):
+        return '/dev/null'
+    def checkpointPlan(self):
         plan = Plan()
-        plan.extend( Step(self,'doStoreRows','/dev/null',self.storedFile(),why=self.explanation()) )
+        plan.append( TransformStep(view=self,whatToDo='doStoreRows',srcs=['/dev/null'],dst=self.storedFile(),why=self.explanation()) )
         return plan
-    def unstoredRowGenerator(self):
+    def rowGenerator(self):
         for row in self.dataSource:
             yield row
-    def unstoredExplanation(self):
+    def explanation(self):
         return [ 'wrap data as %s' % self.tag ]
     def __str__(self):
         s = str(self.dataSource)        
         if len(s)>30: s = s[0:30]+'...'
-        return 'Wrap(%s)' % s + self.showExtras()
+        return 'Wrap("%s")' % s + self.showExtras()
 
 someInts = list(range(10))
 somePairs = [(i/3, i) for i in range(15)]
@@ -77,6 +76,8 @@ def aPlanner():
     p.yD = ReadLines('data/d.txt') | ReplaceEach(by=lambda line:int(line.strip()))
     p.augA = Augment(p.yA, sideview=p.yD, loadedBy=lambda v:GPig.onlyRowOf(v))
     p.hiLo = p.augA | ReplaceEach(by=lambda(a,d):1 if a>d else -1)
+
+    p.uab = Union(p.yA,p.yD)
 
     p.setup()
     return p
@@ -129,8 +130,8 @@ class Test(unittest.TestCase):
         print 'TEST: Planner'
         v = self.p.getView('xMidA')
         #check inferred storage
-        self.assertTrue( self.p.getView('xA').storeMe )
         plan = v.storagePlan()
+        self.assertTrue( self.p.getView('xA').storeMe )
         print 'midA plan:\n',"\n".join(map(str,plan.steps))
         #self.assertTrue(len(plan.steps)==5)
         self.checkEquiv(self.p, 'xMidA', [3,4,6,7])
@@ -138,6 +139,10 @@ class Test(unittest.TestCase):
     def testAugment(self):
         print 'TEST: Augment'
         self.checkExact(self.p, 'hiLo', [-1]*5 + [+1]*4)
+
+    def testUnion(self):
+        print 'TEST: Union'
+        self.checkExact(self.p, 'uab', list(range(10)))
 
     def checkEquiv(self,p,viewName,expected):
         v = p.getView(viewName)
@@ -155,8 +160,8 @@ class Test(unittest.TestCase):
         v = p.getView(viewName)
         v.storagePlan().execute(p)
         actual = list(self.rowsOf(v))
-        print 'expected:',expected
-        print 'actual:  ',actual
+        print 'exact expected:',expected,'len',len(expected)
+        print 'exact actual:  ',actual,'len',len(actual)
         self.assertTrue(len(actual)==len(expected))
         for i in range(len(actual)):
             self.assertTrue(actual[i]==expected[i])
