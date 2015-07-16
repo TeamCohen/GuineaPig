@@ -40,14 +40,62 @@ DOCS:
  - howto for EC2 EMR
  - some longer examples for the tutorial (phirl-naive?)
  - document planner.ship, planner.setReprInverseFun, planner.setSerializer 
-<<<<<<< TODO.txt
-=======
- - clean up .gpmo and other tmp files?
->>>>>>> 1.62
 
 NOTES - EC2
 
-  follow: /Users/wcohen/Documents/code/elastic-mapreduce-cli
+1) Install AWS CLI - see http://docs.aws.amazon.com/cli/latest/userguide/installing.html
+ % curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip > awscli-bundle.zip
+ % unzip awscli-bundle.zip
+ % ./awscli-bundle/install -i `pwd`/install
+ % export PATH=$PATH:/Users/wcohen/Documents/code/aws-cli/install/bin/
+2) check install with
+ % aws --version 
+3) get an access key with https://console.aws.amazon.com/iam/home?#security_credential
+   and save in environment vars
+
+ % aws configure 
+AWS Access Key ID [None]: ...
+AWS Secret Access Key [None]:  ...
+Default region name [None]: us-east-1
+Default output format [None]: json
+
+4) create a keypair: http://docs.aws.amazon.com/cli/latest/userguide/cli-ec2-keypairs.html
+
+ % aws ec2 create-key-pair --key-name MyKeyPair --query 'KeyMaterial' --output text > MyKeyPair.pem
+
+seems like the access key is for interactions with aws, the keypair will be for interactions with
+the clusters you are going to create.
+
+5) now use emr subcommand [docs: http://docs.aws.amazon.com/cli/latest/reference/emr/index.html] to
+build and access the cluster
+
+ % aws emr create-cluster --ami-version 3.8.0 --instance-groups InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m3.xlarge InstanceGroupType=CORE,InstanceCount=2,InstanceType=m3.xlarge --ec2-attributes KeyName=MyKeyPair
+ {
+    "ClusterId": "j-1LF855E531Y16"
+ }
+ - to add: logging output, since the example below fails
+
+ wait a bit then:
+
+ % aws emr put --cluster-id j-1LF855E531Y16 --key-pair-file MyKeyPair.pem --src path/to/tutorial.tgz 
+ % aws emr ssh --cluster-id j-1LF855E531Y16 --key-pair-file MyKeyPair.pem 
+
+ you're logged in so to run
+
+ % unpack the tutorial...
+ % 
+ % export GP_STREAMJAR=/home/hadoop/contrib/streaming/hadoop-streaming.jar
+ % hadoop jar hadoop-examples.jar pi 10 10000000  #somehow this was needed to set up hdfs:/user/hadoop
+ % hadoop fs -mkdir /user/hadoop/gp_views
+ % python param-wordcount.py --opts target:hadoop,viewdir:/user/hadoop/gp_views,echo:1 --params corpus:s3%3A//wcohen-gpig-input/corpus.txt --store wc
+
+ -- this is where things fail now....
+
+--------------------
+
+this is obsolete?
+
+1  follow: /Users/wcohen/Documents/code/elastic-mapreduce-cli
   installed on eddy in /Users/wcohen/Documents/code/elastic-mapreduce-cli, keypair=wcohen
   buckets:  wcohen-gpig-input, wcohen-gpig-views
   helpful: https://aws.amazon.com/articles/Elastic-MapReduce/3938
@@ -57,8 +105,6 @@ NOTES - EC2
   Created job flow j-1F8U85HWYBRBT
   $ ./elastic-mapreduce --jobflow j-1F8U85HWYBRBT --put gpigtut.tgz 
   $ ./elastic-mapreduce --jobflow j-1F8U85HWYBRBT --ssh
-  $ export GP_STREAMJAR=~/contrib/streaming/hadoop-streaming.jar
-  $  hadoop jar hadoop-examples.jar pi 10 10000000  #somehow this was needed to set up hdfs:/user/hadoop
   # then I could copy data in from s3: by just reading it in a ReadLines view...
 
   $ ./elastic-mapreduce --set-termination-protection false

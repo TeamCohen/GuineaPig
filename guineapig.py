@@ -1058,7 +1058,10 @@ class MRCompiler(object):
         return 'python %s --view=%s --do=%s.%d' % (gp._gpigSourceFile,step.view.tag,step.whatToDo,i) + self.__coreCommandOptions(step,gp)
 
     def __coreCommandOptions(self,step,gp):
-        paramOpts = '' if not gp.param else " --params " + ",".join(map(lambda(k,v):k+':'+v, gp.param.items()))
+        if not gp.param:
+            paramOpts = '' 
+        else: 
+            paramOpts = " --params " + ",".join(map(lambda(k,v):k+':'+urllib.quote(v), gp.param.items()))
         nonDefaults = []
         for (k,v) in gp.opts.items():
             #pass in non-default options, or options computed from the environment
@@ -1517,7 +1520,7 @@ class Planner(object):
             print 'OPTIONS are specified as "--opts key:value,...", where legal keys for "opts", with default values, are:'
             for (key,val) in GPig.DEFAULT_OPTS.items():
                 print '  %s:%s' % (key,str(val))
-            print 'Values in the "opts" key/value pairs are assumed to be URL-escaped.'
+            print 'Values in the "opts" key/value pairs are assumed to be URL-escaped.  (Note: %3A escapes a colon.)'
             print ''
             print 'PARAMS are specified as "--params key:value,..." and the associated dictionary is accessible to' 
             print 'user programs via the function GPig.getArgvParams().'
