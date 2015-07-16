@@ -31,13 +31,15 @@ class GPig(object):
     #command-line option, and these are the default values
     #The location of the streaming jar is a special case,
     #in that it's also settable via an environment variable.
-    defaultJar = '/usr/lib/hadoop/contrib/streaming/hadoop-streaming-1.2.0.1.3.0.0-107.jar'
+    defaultJar = '/home/hadoop/contrib/streaming/hadoop-streaming.jar'
     envjar = os.environ.get('GP_STREAMJAR', defaultJar)
+    defaultViewDir = 'gpig_views'
+    envViewDir = os.environ.get('GP_VIEWDIR',defaultViewDir )
     DEFAULT_OPTS = {'streamJar': envjar,
                     'parallel':5,
                     'target':'shell',
                     'echo':0,
-                    'viewdir':'gpig_views',
+                    'viewdir': envViewDir,
                     }
     #These are the types of each option that has a non-string value
     DEFAULT_OPT_TYPES = {'parallel':int,'echo':int}
@@ -45,7 +47,7 @@ class GPig(object):
     #but since the remote worker's environment can be different that
     #the environment of this script, we also need to pass in options
     #computed from the environment
-    COMPUTED_OPTION_DEFAULTS = {'streamJar':defaultJar}
+    COMPUTED_OPTION_DEFAULTS = {'streamJar':defaultJar, 'viewdir':defaultViewDir}
 
     @staticmethod
     def getCompiler(target):
@@ -1114,6 +1116,7 @@ class HadoopCompiler(MRCompiler):
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
         hcom = self.HadoopCommandBuf(gp,task)
         hcom.extendDef('-D','mapred.reduce.tasks=%d' % gp.opts['parallel'])
+        hcom.extend('-cmdenv','PYTHONPATH=.')
         hcom.extend('-input',src,'-output',dst)
         hcom.extend("-mapper '%s'" % mapCom)
         hcom.extend("-reducer '%s'" % reduceCom)
@@ -1519,11 +1522,14 @@ class Planner(object):
             print ''
             print 'OPTIONS are specified as "--opts key:value,...", where legal keys for "opts", with default values, are:'
             for (key,val) in GPig.DEFAULT_OPTS.items():
-                print '  %s:%s' % (key,str(val))
-            print 'Values in the "opts" key/value pairs are assumed to be URL-escaped.  (Note: %3A escapes a colon.)'
+                print '  %s:\t%s' % (key,str(val))
+            print 'The environment variables GP_STREAMJAR and GP_VIEWDIR, if defined, set two of these default values.'
+            print 'Options affect Guinea Pig\'s default behavior.' 
             print ''
             print 'PARAMS are specified as "--params key:value,..." and the associated dictionary is accessible to' 
-            print 'user programs via the function GPig.getArgvParams().'
+            print 'user programs via the function GPig.getArgvParams(). Params are used as program-specific inputs.'
+            print ''
+            print 'Values in the "opts" and "params" key/value pairs are assumed to be URL-escaped.  (Note: %3A escapes a colon.)'
             print ''
             print 'There\'s more help at http://curtis.ml.cmu.edu/w/courses/index.php/Guinea_Pig'
 

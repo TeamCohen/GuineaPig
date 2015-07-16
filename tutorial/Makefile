@@ -1,13 +1,12 @@
 update:
-	echo updates no longer needed
+	cp ../guineapig.py  .
 
 clean:
 	rm -rf gpig_views
 	rm -f total.gp
 	rm *.pyc
 
-tar: 
-	cp ../guineapig.py .
+tar: update
 	echo created on `date` > marker.txt
 	tar -cvzf tutorial.tgz marker.txt guineapig.py *corpus.txt id-parks.txt *.py phirl-naive.pig
 

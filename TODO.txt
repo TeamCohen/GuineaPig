@@ -66,14 +66,27 @@ Default output format [None]: json
 seems like the access key is for interactions with aws, the keypair will be for interactions with
 the clusters you are going to create.
 
+4.5) create a security group:
+
+aws ec2 create-security-group --group-name MySecurityGroup --description "My security group"
+aws ec2 authorize-security-group-ingress --group-name MySecurityGroup --protocol tcp --port 22 --cidr 0.0.0.0/0
+
 5) now use emr subcommand [docs: http://docs.aws.amazon.com/cli/latest/reference/emr/index.html] to
 build and access the cluster
 
- % aws emr create-cluster --ami-version 3.8.0 --instance-groups InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m3.xlarge InstanceGroupType=CORE,InstanceCount=2,InstanceType=m3.xlarge --ec2-attributes KeyName=MyKeyPair
+ % aws emr create-cluster --ami-version 3.8.0 --instance-groups InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m3.xlarge InstanceGroupType=CORE,InstanceCount=2,InstanceType=m3.xlarge --ec2-attributes KeyName=MyKeyPair --log-uri s3n://wcohen-gpig-log
+
  {
     "ClusterId": "j-1LF855E531Y16"
  }
- - to add: logging output, since the example below fails
+
+ should add a name: --name "foo"
+ should add a bootstrap action script: --bootstrap-action Path="s3://wcohen-.../foo.sh" to pull in gpig and notify me with
+ mkdir gpig
+ cd gpig
+ wget http://www.cs.cmu.edu/~wcohen/10-605/gpigtut.tgz
+ tar -xzf gpigtut.tgz
+ echo the cluster is ready now | mail -s test wcohen@gmail.com
 
  wait a bit then:
 
@@ -85,7 +98,7 @@ build and access the cluster
  % unpack the tutorial...
  % 
  % export GP_STREAMJAR=/home/hadoop/contrib/streaming/hadoop-streaming.jar
- % hadoop jar hadoop-examples.jar pi 10 10000000  #somehow this was needed to set up hdfs:/user/hadoop
+ % hadoop jar ~/hadoop-examples.jar pi 10 10000000  #somehow this was needed to set up hdfs:/user/hadoop
  % hadoop fs -mkdir /user/hadoop/gp_views
  % python param-wordcount.py --opts target:hadoop,viewdir:/user/hadoop/gp_views,echo:1 --params corpus:s3%3A//wcohen-gpig-input/corpus.txt --store wc
 
