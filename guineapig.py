@@ -103,7 +103,7 @@ class GPig(object):
 
     @staticmethod
     class SafeEvaluator(object):
-        """Evaluates expressions that correzpond to serialized guinea pig rows."""
+        """Evaluates expressions that correspond to serialized guinea pig rows."""
         def __init__(self,restrictedBindings={}):
             self.restrictedBindings = restrictedBindings
         def eval(self,s):
