@@ -1,14 +1,16 @@
 update:
+	cp ../emr-extras/*-sample.sh
 	cp ../guineapig.py  .
 
 clean:
 	rm -rf gpig_views
 	rm -f total.gp
-	rm *.pyc
+	rm -f *.pyc
 
 tar: update
 	echo created on `date` > marker.txt
-	tar -cvzf tutorial.tgz marker.txt guineapig.py *corpus.txt id-parks.txt *.py phirl-naive.pig
+	(cd ..; tar -cvzf tutorial.tgz tutorial/marker.txt tutorial/guineapig.py tutorial/*corpus.txt tutorial/id-parks.txt tutorial/*.py)
+	mv ../tutorial.tgz .
 
 upload: tar
 	scp tutorial.tgz raff.ml.cmu.edu:~/afs-home/www/10-605/gpigtut.tgz

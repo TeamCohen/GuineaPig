@@ -1,0 +1,89 @@
+EMR (Elastic MapReduce) is a popular cloud processing service from
+Amazon that includes Hadoop.  Running Guinea Pig on EMR is easy
+enough, but there are lots of steps.  This is a walkthrough.
+
+GENERIC INSTRUCTIONS FOR EMR:
+
+1) First you need to get an Amazon AWS account.  If you have an Amazon
+account, you can just use that password to log into AWS at
+https://console.aws.amazon.com.
+
+2) Install the tools: You need to establish the credentials you need
+to use EC2, the "Elastic Cloud" service that includes EMR, and also
+use EC2 to launch new virtual clusters in EMR.  I use a command-line
+program (aka a "CLI") to do this.  So first, install that program, the
+AWS CLI.  The details are in
+
+http://docs.aws.amazon.com/ElasticMapReduce/latest/DeveloperGuide/emr-manage-view-web-log-files.html
+
+but briefly, go to a convenient directory, say ~/code/aws-cli, and type
+
+ % curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip > awscli-bundle.zip
+ % unzip awscli-bundle.zip
+ % ./awscli-bundle/install -i `pwd`/install
+ % export PATH=$PATH:~/code/aws-cli/install/bin/
+
+To test, type 'aws --version' at the command prompt.
+
+3) Get your access codes.  An "access key" is a set of codes, one
+private, and one public, that are used to interact with the AWS CLI
+tool.  Follow the directions here, and save the result somewhere.
+ 
+https://console.aws.amazon.com/iam/home?#security_credential
+
+4) Tell the AWS CLI about your access codes.  The command for this is
+'aws configure': you'll be asked for your codes and some other info,
+and I used these:
+
+ % aws configure 
+ AWS Access Key ID [None]: ...
+ AWS Secret Access Key [None]:  ...
+ Default region name [None]: us-east-1
+ Default output format [None]: json
+
+This info is stored somewhere off your home directory.
+
+5) Create a key-pair. You'd think one set of codes would be enough,
+but you're not done yet; you need another set of public/private codes
+called a "keypair" to interact with the clusters you create.  The
+details are at http://docs.aws.amazon.com/cli/latest/userguide/cli-ec2-keypairs.html
+but the quick version is to use these commands (the second keeps the keys secret).
+
+ % aws ec2 create-key-pair --key-name MyKeyPair --query 'KeyMaterial' --output text > MyKeyPair.pem
+ % chmod 600 MyKeyPair.pem
+
+6) Create a security group.  This one will let any IP address try ssh
+into your cluster (but I believe they need the keypair you use at
+creation time to be successful).  You can specify a range of IPs if
+you want.
+
+ % aws ec2 create-security-group --group-name MySecurityGroup --description "My security group"
+ % aws ec2 authorize-security-group-ingress --group-name MySecurityGroup --protocol tcp --port 22 --cidr 0.0.0.0/0
+
+7) Create a cluster.  You only need to do steps 1-6 once (for each
+machine you want to work from anyway) and after that, you can create a
+cluster with just one more command.  This command is very customizable but
+one that works would be
+
+ % aws emr create-cluster --ami-version 3.8.0  --ec2-attributes KeyName=MyKeyPair \
+   --instance-groups InstanceGroupType=MASTER,InstanceCount=1,InstanceType=m3.xlarge InstanceGroupType=CORE,InstanceCount=2,InstanceType=m3.xlarge \
+
+The instance-groups stuff defines the cluster you want - this one is
+tiny, with three nodes.  The KeyName, which should have the name of
+the keypair you created in step 5, is how the new cluster will know
+whether or not to let you in.  This will output something like:
+
+  {
+      "ClusterId": "j-JEX5UT60ELD5"
+  }
+
+which is the name of the cluster.  It will take some time (10min?) to
+start up, and then you can log into the master using your keypair:
+
+ % aws emr ssh --cluster-id j-JEX5UT60ELD5 --key-pair-file MyKeyPair.pem 
+
+8) Use your cluster and then - when you are all done - TERMINATE IT.
+The meter keeps running until you do!
+
+INSTRUCTIONS FOR GUINEA PIG:
+
