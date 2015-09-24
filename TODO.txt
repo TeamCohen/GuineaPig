@@ -2,6 +2,7 @@ TODO - priorities
 
 FUNCTIONALITY
 
+ - get rid of the KeyError for improper usage of params
  - option(storedIn=FILE) - so you can retrieve and store work on s3
  - add Stream(view1, through='shell command', shipping=[f1,..,fk])
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 

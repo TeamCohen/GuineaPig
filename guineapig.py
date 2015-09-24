@@ -24,14 +24,15 @@ class GPig(object):
     SORT_COMMAND = 'LC_COLLATE=C sort'  # use standard ascii ordering, not locale-specific one
     HADOOP_LOC = 'hadoop'               # assume hadoop is on the path at planning time
     MY_LOC = 'guineapig.py'             # the name of this file
-    VERSION = '1.3.2'
+    VERSION = '1.3.3'
     COPYRIGHT = '(c) William Cohen 2014,2015'
 
     #Global options for Guinea Pig can be passed in with the --opts
     #command-line option, and these are the default values
     #The location of the streaming jar is a special case,
     #in that it's also settable via an environment variable.
-    defaultJar = '/home/hadoop/contrib/streaming/hadoop-streaming.jar'
+    #defaultJar = '/home/hadoop/contrib/streaming/hadoop-streaming.jar'
+    defaultJar = '/opt/cloudera/parcels/CDH/lib/hadoop-mapreduce/hadoop-streaming.jar'
     envjar = os.environ.get('GP_STREAMJAR', defaultJar)
     defaultViewDir = 'gpig_views'
     envViewDir = os.environ.get('GP_VIEWDIR',defaultViewDir )
@@ -103,7 +104,7 @@ class GPig(object):
 
     @staticmethod
     class SafeEvaluator(object):
-        """Evaluates expressions that correspond to serialized guinea pig rows."""
+        """Evaluates expressions that correzpond to serialized guinea pig rows."""
         def __init__(self,restrictedBindings={}):
             self.restrictedBindings = restrictedBindings
         def eval(self,s):
@@ -267,6 +268,8 @@ class View(object):
         plan = Plan()
         plan.includeStepsOf(self.checkpointPlan())
         plan.append(TransformStep(view=self,whatToDo='doStoreRows',srcs=[self.checkpoint()],dst=self.storedFile(),why=self.explanation()))
+        if self.storeMe=='distributedCache':
+            plan.append(DistributeStep(self))
         return plan
             
     def applyDict(self,mapping,innerviewsOnly=False):
@@ -337,6 +340,7 @@ class View(object):
             print tabStr + sideviewIndicator + tagStr + ' = ' + '...'
         else:
             sideviewInfo = "  sideviews: {"+",".join(map(lambda x:x.tag, self.sideviews))+"}" if self.sideviews else ""
+            sideviewInfo += "  *sideviews: {"+",".join(map(lambda x:x.tag, self.sideviewsNeeded()))+"}" if self.sideviewsNeeded() else ""
             print tabStr + sideviewIndicator + tagStr + ' = ' + str(self) + sideviewInfo
             alreadyPrinted.add(self.tag)
             for inner in self.inners:
@@ -517,6 +521,7 @@ class Augment(Transformation):
 
     def enforceStorageConstraints(self):
         for sv in self.sideviews:
+            logging.info('marking '+sv.tag+' to be placed in the distributedCache')
             sv.storeMe = 'distributedCache'
 
     def rowGenerator(self):
@@ -528,10 +533,9 @@ class Augment(Transformation):
         plan = Plan()
         plan.includeStepsOf(self.inner.checkpointPlan())
         #the sideviews should have been stored by the top-level
-        #planner already, but they will need to be moved to a
-        #distributable location
-        for sv in self.sideviews:
-            plan.append(DistributeStep(sv))
+        #planner already, and distributed, if marked as storeMe==distributedCache
+        #for sv in self.sideviews:
+        #    plan.append(DistributeStep(sv))
         return plan
 
     def explanation(self):
@@ -891,7 +895,7 @@ class Step(object):
 #
 
 class DistributeStep(Step):
-    """Prepare a stored view for the dDistributed cache."""
+    """Prepare a stored view for the distributed cache."""
 
     def __init__(self,view):
         Step.__init__(self,view)
@@ -1109,6 +1113,7 @@ class HadoopCompiler(MRCompiler):
         assert src,'Wrap not supported for hadoop'
         hcom = self.HadoopCommandBuf(gp,task)
         hcom.extendDef('-D','mapred.reduce.tasks=0')
+        hcom.extend('-cmdenv','PYTHONPATH=.')
         hcom.extend('-input',src,'-output',dst)
         hcom.extend("-mapper '%s'" % mapCom)
         return [ self._hadoopCleanCommand(gp,dst), hcom.asEcho(), hcom.asString() ]
@@ -1128,6 +1133,7 @@ class HadoopCompiler(MRCompiler):
         for i in range(len(srcs)):
             hcom = self.HadoopCommandBuf(gp,task)
             hcom.extendDef('-D','mapred.reduce.tasks=%d' % gp.opts['parallel'])
+            hcom.extend('-cmdenv','PYTHONPATH=.')
             hcom.extend('-input',srcs[i], '-output',midi(i))
             hcom.extend("-mapper","'%s'" % mapComs[i])
             subplan += [ self._hadoopCleanCommand(gp,midi(i)), hcom.asEcho(), hcom.asString() ]
@@ -1137,6 +1143,7 @@ class HadoopCompiler(MRCompiler):
         hcombineCom.extendDef('-jobconf','num.key.fields.for.partition=1')
         for i in range(len(srcs)):
             hcombineCom.extend('-input',midi(i))
+        hcombineCom.extend('-cmdenv','PYTHONPATH=.')
         hcombineCom.extend('-output',dst)
         hcombineCom.extend('-mapper','cat')
         hcombineCom.extend('-reducer',"'%s'" % reduceCom)

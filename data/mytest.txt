@@ -1,0 +1,10 @@
+r1000.txt	acq	a	again	already	amount	acquired	acquisition	alameda	
+r10011.txt	crude,nat-gas	agency	billion	billion	billion	billion	canada	canadian	canadian
+r10015.txt	veg-oil	a	added	added	against	agricultural	annual	begins	begins
+r10037.txt	earn	cts	cts	cts	cts	mln	mln	mln	mln
+r10038.txt	gas	allow	barrels	barrels	barrels	basis	beaumont	beaumont	beaumont
+r1003.txt	earn	accounting	adjustments	august	before	company	company	cts	cts
+r10049.txt	acq	abuse	abuse	access	access	across	actions	advocated	advocated
+r10053.txt	earn	available	cts	cts	cts	data	loss	loss	loss
+r10057.txt	earn	already	also	april	capital	commonwealth	commonwealth	commonwealth	commonwealth
+r10058.txt	acq	acquired	acquired	acquisition	alameda	alameda	alameda	alameda	california

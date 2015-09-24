@@ -1,0 +1,9 @@
+bkey	bkey-val
+bkey2	bkey2-val1
+bkey2	bkey2-val2
+w	bw1
+w	bw2
+x	bx
+y	by
+z	bz1
+z	bz2

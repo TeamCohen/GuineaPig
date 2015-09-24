@@ -1,0 +1,5 @@
+w	cw
+x	cx1
+x	cx2
+z	cz
+
