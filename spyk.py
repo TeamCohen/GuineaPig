@@ -31,6 +31,7 @@ class SpykContext(object):
     def __init__(self,**kw):
         self.planner = guineapig.Planner(**kw)
         self.tagCodeIndex = 0
+        self.cachedViews = set()
 
     def setSerializer(self,setSerializer):
         """Delegate to the SpykContext's planner."""
@@ -62,9 +63,12 @@ class SpykContext(object):
 
     def finalize(self):
         """Declare the SpykRDD and all RDD definitions complete.  This must be
-        called in the __name__=="__main__" part of the code, because
-        it also executes substeps when called recursively."""
+        called in the __name__=="__main__" part of the code, after all
+        transformations have been defined, because it also executes
+        substeps when called as part of a plan."""
         self.planner.setup()        
+        for rdd in self.cachedViews:
+            rdd.view.opts(stored=True)
         if guineapig.Planner.partOfPlan(sys.argv):
             self.planner.main(sys.argv)
 
@@ -84,16 +88,12 @@ class SpykRDD(object):
         self.context.tagCodeIndex += 1
         self.context.planner._setView("%s__%d" % (tag,self.context.tagCodeIndex), view)
 
-    #TODO this doesn't work, need to use a different mechanism,
-    #maybe with a wrapper around plan/execute
     def cache(self):
-        self.view = self.view.opts(stored=True)
+        """Mark this as to-be-cached on disk."""
+        self.context.cachedViews.add(self)
         return self
 
     #transformations, which return new SpykRDD's
-
-    #TODO
-    #cogroup
 
     def map(self,mapfun):
         """Analogous to the corresponding Spark transformation."""
@@ -162,11 +162,8 @@ class SpykRDD(object):
                                        reducingTo = guineapig.ReduceToCount()))
 
     ###############################################################################
-    # 
     # actions, which setup(), execute a plan, and retrieve the results.
-    #
     # TODO: include steps to download HDFS output
-    #
     ###############################################################################
 
     def collect(self):
@@ -186,6 +183,7 @@ class SpykRDD(object):
         plan = self.view.storagePlan()
         plan.execute(self.context.planner, echo=self.context.planner.opts['echo'])
         k = 0
+        #TODO: download from hdfs if needed
         for line in open(self.view.storedFile()):
             k += 1
             if n<0 or k<=n:
