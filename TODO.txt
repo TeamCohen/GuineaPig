@@ -2,7 +2,15 @@ TODO - priorities
 
 FUNCTIONALITY
 
- - get rid of the KeyError for improper usage of params
+ - add getArgvParams(required="x y z", optional="w x y")
+ - add any hadoop options: 
+ -- note defs and jobconf, "-D x=y", "-jobconf x=y", are different from options like "-cmdEnv x=y"
+ -- also note: tasks contain steps, steps point back to views, so tasks can collect options from there
+ -- probably the right approach: 
+ ---- have dict-of-dicts indexed by 'D', 'jobconf', 'cmdEnv'
+ ---- have have HadoopCompiler merge/override planner-level defaults for the dict-of-dicts with task-level ones
+ ---- have planner options go by: --opts D.map.reduce.tasks:20,...
+     
  - option(storedIn=FILE) - so you can retrieve and store work on s3
  - add Stream(view1, through='shell command', shipping=[f1,..,fk])
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 

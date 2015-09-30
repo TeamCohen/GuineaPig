@@ -932,13 +932,14 @@ class AbstractMapReduceTask(object):
     operation, possibly with some file managements steps to set up the
     task.  More specifically, this consists of 
 
-    1a) a maybe-empty sequence of DistributeStep's
-    2a) a PrereduceStep followed by a TransformStep
+    1a) distribute: a maybe-empty sequence of DistributeStep's
+    2a) map: a PrereduceStep or a TransformStep 
+
     or else
 
-    1b) a maybe-empty sequence of DistributeStep's
-    2b) a PrereduceStep
-    3b) a TransformStep
+    1b) distribute: a maybe-empty sequence of DistributeStep's
+    2b) map: a PrereduceStep
+    3b) reduce: a TransformStep
 
     Sequence 1a-2a is a map-only task, and sequence 1b-3b is a
     map-reduce task.
@@ -1423,7 +1424,7 @@ class Planner(object):
         self.runMain(argv)
 
     def runMain(self,argv):
-        """Called by main()."""
+        """Called by main() after setup()"""
 
         # parse the options and dispatch appropriately
         argspec = ["store=", "cat=", "reuse", "help",
