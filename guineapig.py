@@ -1409,6 +1409,9 @@ class Planner(object):
     # rest of the API for the planner
     # 
 
+    def serialize(self,row):
+        return self._serializer.toString(row)
+
     @staticmethod
     def partOfPlan(argv):
         """True if the command line was generated as part of a storage plan."""
