@@ -176,6 +176,7 @@ class View(object):
         self.planner = None       #pointer to planner object
         self.tag = None           #for naming storedFile and checkpoints
         self.storeMe = None       #try and store this view if true
+        self.parallelForMe = None #level of parallelism, locally to this view
         self.retainedPart = None  #used in map-reduce views only
         self.sideviews = []       #non-empty for Augment views only
         self.inners = []          #always used
@@ -189,7 +190,7 @@ class View(object):
     # ways to modify a view
     # 
 
-    def opts(self,stored=None):
+    def opts(self,stored=None,parallel=None):
         """Return the same view with options set appropriately.  Possible
         options include:
 
@@ -204,6 +205,7 @@ class View(object):
             """
 
         self.storeMe = stored
+        self.parallelForMe = int(parallel)
         return self
 
     def showExtras(self):
@@ -211,6 +213,7 @@ class View(object):
         result = ''
         flagPairs = []
         if self.storeMe: flagPairs += ['stored=%s' % repr(self.storeMe)]
+        if self.parallelForMe: flagPairs += ['parallel=%d' % self.parallelForMe]
         if flagPairs: result += '.opts(' + ",".join(flagPairs) + ')'
         return result
 
@@ -967,6 +970,12 @@ class AbstractMapReduceTask(object):
         else:
             return False
             
+    def reduceParallel(self,gp):
+        if self.reduceStep:
+            return self.reduceStep.view.parallelForMe or gp.opts['parallel']
+        else:
+            return self.mapStep.view.parallelForMe or gp.opts['parallel']
+
     def explanation(self):
         """Concatenate together the explanations for the different steps of
         2this task."""
@@ -1120,8 +1129,9 @@ class HadoopCompiler(MRCompiler):
         return [ self._hadoopCleanCommand(gp,dst), hcom.asEcho(), hcom.asString() ]
 
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
+        p = task.reduceParallel(gp)
         hcom = self.HadoopCommandBuf(gp,task)
-        hcom.extendDef('-D','mapred.reduce.tasks=%d' % gp.opts['parallel'])
+        hcom.extendDef('-D','mapred.reduce.tasks=%d' % p)
         hcom.extend('-cmdenv','PYTHONPATH=.')
         hcom.extend('-input',src,'-output',dst)
         hcom.extend("-mapper '%s'" % mapCom)
@@ -1130,16 +1140,17 @@ class HadoopCompiler(MRCompiler):
         
     def joinCommands(self,task,gp,mapComs,reduceCom,srcs,midpoint,dst):
         def midi(i): return midpoint + '-' + str(i)
+        p = task.reduceParallel(gp)
         subplan = []
         for i in range(len(srcs)):
             hcom = self.HadoopCommandBuf(gp,task)
-            hcom.extendDef('-D','mapred.reduce.tasks=%d' % gp.opts['parallel'])
+            hcom.extendDef('-D','mapred.reduce.tasks=%d' % p)
             hcom.extend('-cmdenv','PYTHONPATH=.')
             hcom.extend('-input',srcs[i], '-output',midi(i))
             hcom.extend("-mapper","'%s'" % mapComs[i])
             subplan += [ self._hadoopCleanCommand(gp,midi(i)), hcom.asEcho(), hcom.asString() ]
         hcombineCom = self.HadoopCommandBuf(gp,task)
-        hcombineCom.extendDef('-D','mapred.reduce.tasks=%d' % gp.opts['parallel'])
+        hcombineCom.extendDef('-D','mapred.reduce.tasks=%d' % p)
         hcombineCom.extendDef('-jobconf','stream.num.map.output.key.fields=3')
         hcombineCom.extendDef('-jobconf','num.key.fields.for.partition=1')
         for i in range(len(srcs)):
@@ -1260,7 +1271,7 @@ class Planner(object):
         elif self.opts['target']=='hadoop':
             p = urlparse.urlparse(self.opts['viewdir'])
             if not p.path.startswith("/"):
-                logging.warn('hadoop viewdir should be absolite path: will try prefixing /user/$LOGNAME')
+                logging.warn('hadoop viewdir should be absolute path: will try prefixing /user/$LOGNAME')
                 username = os.environ.get('LOGNAME','me')
                 self.opts['viewdir'] = '/user/'+username+'/'+self.opts['viewdir']
                 logging.warn('viewdir is set to '+self.opts['viewdir'])
