@@ -2,16 +2,19 @@ TODO - priorities
 
 FUNCTIONALITY
 
+in options:
+
  - add getArgvParams(required="x y z", optional="w x y")
  - add any hadoop options: 
  -- note defs and jobconf, "-D x=y", "-jobconf x=y", are different from options like "-cmdEnv x=y"
  -- also note: tasks contain steps, steps point back to views, so tasks can collect options from there
- -- probably the right approach: 
- ---- have dict-of-dicts indexed by 'D', 'jobconf', 'cmdEnv'
- ---- have have HadoopCompiler merge/override planner-level defaults for the dict-of-dicts with task-level ones
- ---- have planner options go by: --opts D.map.reduce.tasks:20,...
+ -- did parallel this way (maps to #reducers option)
+ -- general options:
+ --- allow view.opts(hDefs="-D x=y ...".split(), hOpts="-x y=z ...".split())
+ --- allow planner.hDefs(...), planner.hOpts(...) or --hDefs --hOpts
+ --- collect planner + view opts when creating hadoop jobs
      
- - option(storedIn=FILE) - so you can retrieve and store work on s3
+ - option(storedIn=FILE) - so you can retrieve and store work on s3, etc
  - add Stream(view1, through='shell command', shipping=[f1,..,fk])
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 
  - add user-defined Reuse(FILE) ? (why do I want this again?)
@@ -21,11 +24,15 @@ FUNCTIONALITY
  -- Wrap?
  -- Describe?
  -- Illustrate?
+ -- WholeTextFiles?
 
  - efficiency
- -- combiners: add combiner as combiningTo=.. option of Group.  
- -- compression -jobconf mapred.output.compress=true -jobconf mapred.output.compression.codec=org.apache.hadoop.io.compress.GzipCode
- -- hadoop options (parallel, hopts, ...)
+ - multiple store targets?
+ - combiners: 
+ -- add combiner as combiningTo=.. option of Group.  
+ -- add command-line option '--doCombineRows' which sets a flag in the view, and then calls doStoreRows(), which then uses combiningTo instead of reducingTo
+ -- in hadoop compiler, set -combiner to be reduceCom modified so that '-doStoreRows' is replaced with '-doCombineRows'
+ - compression -jobconf mapred.output.compress=true -jobconf mapred.output.compression.codec=org.apache.hadoop.io.compress.GzipCode
 
  - cleanup
  -- standardize view.by argument

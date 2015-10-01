@@ -654,7 +654,7 @@ class Group(MapReduce):
         return plan
 
     def rowGenerator(self):
-        """Group objects from stdin by key, yielding tuples (key,[g1,..,gn])."""
+        """Group objects from stdin by key, yielding tuples (key,[g1,..,gn]), or appropriate reduction of that list.."""
         lastkey = key = None
         accum = self.reducingTo.baseType()
         for line in sys.stdin:
