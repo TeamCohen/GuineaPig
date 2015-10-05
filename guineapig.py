@@ -2,8 +2,6 @@
 # (C) Copyright 2014, 2015 William W. Cohen.  All rights reserved.
 ##############################################################################
 
-#status: mysterious failure of hdefs to stay saved????
-
 import sys
 import logging
 import copy
@@ -220,7 +218,7 @@ class View(object):
             """
 
         self.storeMe = stored
-        self.parallelForMe = int(parallel)
+        if parallel: self.parallelForMe = int(parallel)
         self.hDefsForMe = hdefs
         self.hOptsForMe = hopts
         return self
@@ -1431,9 +1429,7 @@ class Planner(object):
 
     def hdefs(self,hdefList):
         """Similar to view.opts(hdefs=....) but provides defaults for all Hadoop jobs launched by a planner."""
-        logging.warn('hdefs called with '+str(hdefList))
-        self.hdefsForPlanner = hdefList
-        logging.warn('hdefs set to '+str(self.hdefsForPlanner))
+        self.hDefsForPlanner = hdefList
 
     def hopts(self,hoptList):
         """Similar to view.opts(hopts=....) but provides defaults for all Hadoop jobs launched by a planner."""
@@ -1492,8 +1488,6 @@ class Planner(object):
             sys.exit(-1)
         optdict = dict(optlist)
         
-        logging.warn('optdict is ' + str(optdict))
-
         # decide what views can be re-used, vs which need fresh plans
         if '--reuse' in optdict:  #reuse the views listed in the arguments
             for a in args:
