@@ -1,20 +1,20 @@
-TODO - priorities
+
 
 FUNCTIONALITY
 
-in options:
+working in branch options:
 
  - add getArgvParams(required="x y z", optional="w x y")
  - add any hadoop options: 
  -- note defs and jobconf, "-D x=y", "-jobconf x=y", are different from options like "-cmdEnv x=y"
  -- also note: tasks contain steps, steps point back to views, so tasks can collect options from there
- -- did parallel this way (maps to #reducers option)
+ -- did parallel this way (maps to #reducers option) -DONE
  -- general options:
  --- allow view.opts(hDefs="-D x=y ...".split(), hOpts="-x y=z ...".split())
  --- allow planner.hDefs(...), planner.hOpts(...) or --hDefs --hOpts
  --- collect planner + view opts when creating hadoop jobs
-     
  - option(storedIn=FILE) - so you can retrieve and store work on s3, etc
+
  - add Stream(view1, through='shell command', shipping=[f1,..,fk])
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 
  - add user-defined Reuse(FILE) ? (why do I want this again?)

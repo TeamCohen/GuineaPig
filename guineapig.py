@@ -2,6 +2,8 @@
 # (C) Copyright 2014, 2015 William W. Cohen.  All rights reserved.
 ##############################################################################
 
+#status: mysterious failure of hdefs to stay saved????
+
 import sys
 import logging
 import copy
@@ -177,6 +179,8 @@ class View(object):
         self.tag = None           #for naming storedFile and checkpoints
         self.storeMe = None       #try and store this view if true
         self.parallelForMe = None #level of parallelism, locally to this view
+        self.hDefsForMe = []      # hadoop defs, -D param.name=value
+        self.hOptsForMe = []      # hadoop opts, like -jobconf param.name=value
         self.retainedPart = None  #used in map-reduce views only
         self.sideviews = []       #non-empty for Augment views only
         self.inners = []          #always used
@@ -190,7 +194,7 @@ class View(object):
     # ways to modify a view
     # 
 
-    def opts(self,stored=None,parallel=None):
+    def opts(self,stored=None,parallel=None,hdefs=[],hopts=[]):
         """Return the same view with options set appropriately.  Possible
         options include:
 
@@ -202,10 +206,23 @@ class View(object):
             
           - stored='distributedCache' - Store this view in the working
             directory and/or the Hadoop distributed cache.
+            
+          - parallel=N - suggestion to use N reducer tasks for this view. 
+
+          - hdefs=['-D','param.name=param.value', ...] - Hadoop param
+            definitions to pass in to the hadoop streaming tasks that
+            implement this view.  Each param.name=value pair should
+            be preceded by a '-D' string.
+
+          - hopts=['-jobconf','param.name=param.value', ...] - Hadoop 
+            options to pass in to the hadoop streaming tasks that
+            implement this view.
             """
 
         self.storeMe = stored
         self.parallelForMe = int(parallel)
+        self.hDefsForMe = hdefs
+        self.hOptsForMe = hopts
         return self
 
     def showExtras(self):
@@ -1126,6 +1143,7 @@ class HadoopCompiler(MRCompiler):
         hcom.extend('-cmdenv','PYTHONPATH=.')
         hcom.extend('-input',src,'-output',dst)
         hcom.extend("-mapper '%s'" % mapCom)
+        self._extendWithHadoopOptions(hcom,gp,task)
         return [ self._hadoopCleanCommand(gp,dst), hcom.asEcho(), hcom.asString() ]
 
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
@@ -1136,6 +1154,7 @@ class HadoopCompiler(MRCompiler):
         hcom.extend('-input',src,'-output',dst)
         hcom.extend("-mapper '%s'" % mapCom)
         hcom.extend("-reducer '%s'" % reduceCom)
+        self._extendWithHadoopOptions(hcom,gp,task)
         return [ self._hadoopCleanCommand(gp,dst), hcom.asEcho(), hcom.asString() ]
         
     def joinCommands(self,task,gp,mapComs,reduceCom,srcs,midpoint,dst):
@@ -1160,8 +1179,18 @@ class HadoopCompiler(MRCompiler):
         hcombineCom.extend('-mapper','cat')
         hcombineCom.extend('-reducer',"'%s'" % reduceCom)
         hcombineCom.extend('-partitioner','org.apache.hadoop.mapred.lib.KeyFieldBasedPartitioner')
+        self._extendWithHadoopOptions(hcom,gp,task)
         subplan += [ self._hadoopCleanCommand(gp,dst),  hcombineCom.asEcho(), hcombineCom.asString() ]
         return subplan
+
+    def _extendWithHadoopOptions(self,hcombuf,gp,task):
+        hcombuf.extendDef(*gp.hDefsForPlanner)
+        hcombuf.extend(*gp.hOptsForPlanner)
+        hcombuf.extendDef(*task.mapStep.view.hDefsForMe)
+        hcombuf.extend(*task.mapStep.view.hOptsForMe)
+        if task.reduceStep:
+            hcombuf.extendDef(*task.reduceStep.view.hDefsForMe)
+            hcombuf.extend(*task.reduceStep.view.hOptsForMe)
 
     class HadoopCommandBuf(object):
         """Utility to hold the various pieces of a hadoop command."""
@@ -1216,6 +1245,11 @@ class Planner(object):
     """Can create storage plans for views that are defined as parts of it."""
 
     def __init__(self,**kw):
+
+        # these are Hadoop-specific options
+
+        self.hDefsForPlanner = []
+        self.hOptsForPlanner = []
 
         #Parameters are used for programmatically giving user-defined
         #config information to a planner, or they can be specified in
@@ -1395,6 +1429,16 @@ class Planner(object):
     # dealing with the file storage system and related stuff
     #
 
+    def hdefs(self,hdefList):
+        """Similar to view.opts(hdefs=....) but provides defaults for all Hadoop jobs launched by a planner."""
+        logging.warn('hdefs called with '+str(hdefList))
+        self.hdefsForPlanner = hdefList
+        logging.warn('hdefs set to '+str(self.hdefsForPlanner))
+
+    def hopts(self,hoptList):
+        """Similar to view.opts(hopts=....) but provides defaults for all Hadoop jobs launched by a planner."""
+        self.hOptsForPlanner = hoptList
+
     def ship(self,fileName):
         """Declare a set of inputs to be 'shipped' to the hadoop cluster."""
         for d in sys.path:
@@ -1438,7 +1482,7 @@ class Planner(object):
         """Called by main() after setup()"""
 
         # parse the options and dispatch appropriately
-        argspec = ["store=", "cat=", "reuse", "help",
+        argspec = ["store=", "cat=", "reuse", "help", 
                    "list", "pprint=", "steps=", "tasks=", "plan=", 
                    "params=", "opts=", "do=", "view="]
         try:
@@ -1448,6 +1492,8 @@ class Planner(object):
             sys.exit(-1)
         optdict = dict(optlist)
         
+        logging.warn('optdict is ' + str(optdict))
+
         # decide what views can be re-used, vs which need fresh plans
         if '--reuse' in optdict:  #reuse the views listed in the arguments
             for a in args:
