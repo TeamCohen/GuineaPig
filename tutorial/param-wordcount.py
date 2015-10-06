@@ -10,7 +10,7 @@ def tokens(line):
 #always subclass Planner
 class WordCount(Planner):
 
-    D = GPig.getArgvParams()
+    D = GPig.getArgvParams(required=['corpus'])
     wc = ReadLines(D['corpus']) | Flatten(by=tokens) | Group(by=lambda x:x, reducingTo=ReduceToCount())
 
 # always end like this

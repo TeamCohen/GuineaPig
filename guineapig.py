@@ -59,10 +59,15 @@ class GPig(object):
         else: assert 'illegal compilation target '+target
 
     @staticmethod
-    def getArgvParams(): 
+    def getArgvParams(required=[]): 
         """Return a dictionary holding the argument of the --params option in
-        sys.argv."""
-        return GPig.getArgvDict('--params')
+        sys.argv.  The argument requiredParams, if present, is a list
+        of dictionary keys that must be present.  Otherwise an error will
+        be thrown."""
+        result =  GPig.getArgvDict('--params')
+        for p in required:
+            assert p in result, '--params must contain a value for "'+p+"', e.g., --params "+p+":FOO"
+        return result
 
     @staticmethod
     def getArgvOpts(): 
@@ -176,6 +181,7 @@ class View(object):
         self.planner = None       #pointer to planner object
         self.tag = None           #for naming storedFile and checkpoints
         self.storeMe = None       #try and store this view if true
+        self.storeMeAt = None     #file name to store the file
         self.parallelForMe = None #level of parallelism, locally to this view
         self.hDefsForMe = []      # hadoop defs, -D param.name=value
         self.hOptsForMe = []      # hadoop opts, like -jobconf param.name=value
@@ -192,7 +198,7 @@ class View(object):
     # ways to modify a view
     # 
 
-    def opts(self,stored=None,parallel=None,hdefs=[],hopts=[]):
+    def opts(self,stored=None,storedAt=None,parallel=None,hdefs=[],hopts=[]):
         """Return the same view with options set appropriately.  Possible
         options include:
 
@@ -205,6 +211,9 @@ class View(object):
           - stored='distributedCache' - Store this view in the working
             directory and/or the Hadoop distributed cache.
             
+          - storedAt=path/to/file - Store this view in this location,
+            not in the viewdir'
+
           - parallel=N - suggestion to use N reducer tasks for this view. 
 
           - hdefs=['-D','param.name=param.value', ...] - Hadoop param
@@ -218,6 +227,9 @@ class View(object):
             """
 
         self.storeMe = stored
+        if storedAt:
+            if not self.storeMe: self.storeMe=True
+            self.storeMeAt = storedAt
         if parallel: self.parallelForMe = int(parallel)
         self.hDefsForMe = hdefs
         self.hOptsForMe = hopts
@@ -238,7 +250,8 @@ class View(object):
 
     def storedFile(self):
         """The file that will hold the materialized relation."""
-        return self.planner.opts['viewdir'] + '/' + self.tag + '.gp'
+        if self.storeMeAt: return self.storeMeAt
+        else: return self.planner.opts['viewdir'] + '/' + self.tag + '.gp'
 
     def distributableFile(self):
         """The file that will hold the materialized relation in the working directory
@@ -1186,7 +1199,7 @@ class HadoopCompiler(MRCompiler):
         hcombuf.extend(*gp.hOptsForPlanner)
         hcombuf.extendDef(*task.mapStep.view.hDefsForMe)
         hcombuf.extend(*task.mapStep.view.hOptsForMe)
-        if task.reduceStep:
+        if task.reduceStep and task.reduceStep.view!=task.mapStep.view:
             hcombuf.extendDef(*task.reduceStep.view.hDefsForMe)
             hcombuf.extend(*task.reduceStep.view.hOptsForMe)
 
@@ -1429,18 +1442,18 @@ class Planner(object):
 
     def hdefs(self,hdefList):
         """Similar to view.opts(hdefs=....) but provides defaults for all Hadoop jobs launched by a planner."""
-        self.hDefsForPlanner = hdefList
+        self.hDefsForPlanner += hdefList
 
     def hopts(self,hoptList):
         """Similar to view.opts(hopts=....) but provides defaults for all Hadoop jobs launched by a planner."""
-        self.hOptsForPlanner = hoptList
+        self.hOptsForPlanner += hoptList
 
     def ship(self,fileName):
         """Declare a set of inputs to be 'shipped' to the hadoop cluster."""
         for d in sys.path:
             location = os.path.join(d,fileName)
             if os.path.isfile(location):
-                logging.info('located %s at %s' % (fileName,location))
+                logging.debug('located %s at %s' % (fileName,location))
                 self._shippedFiles.append(location)
                 return
         logging.error("didn't locate %s on sys.path: path is %r" % (fileName,sys.path))
@@ -1478,7 +1491,7 @@ class Planner(object):
         """Called by main() after setup()"""
 
         # parse the options and dispatch appropriately
-        argspec = ["store=", "cat=", "reuse", "help", 
+        argspec = ["store=", "cat=", "reuse", "help", "hopts=", "hdefs=",
                    "list", "pprint=", "steps=", "tasks=", "plan=", 
                    "params=", "opts=", "do=", "view="]
         try:
@@ -1488,6 +1501,12 @@ class Planner(object):
             sys.exit(-1)
         optdict = dict(optlist)
         
+        #import any planner-level hadoop options from the command line
+        if '--hopts' in optdict:
+            self.hopts(optdict['--hopts'].split())
+        if '--hdefs' in optdict:
+            self.hdefs(optdict['--hdefs'].split())
+
         # decide what views can be re-used, vs which need fresh plans
         if '--reuse' in optdict:  #reuse the views listed in the arguments
             for a in args:

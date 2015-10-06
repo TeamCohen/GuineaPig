@@ -2,19 +2,15 @@
 
 FUNCTIONALITY
 
-working in branch options:
+working in branch 'options':
+ - add hadoop options:
+ -- planner-level defaults: --hopts "..." --hdefs "..." at command-line
+ -- planner-level defaults: planner.hopts([..]), planner.hdefs([..]), ...
+ -- view-level: opts(hopts=[...], hdefs=[...])
+ - getArgvParams(required="x y z".split()) - throws errors if somethings missing
+ - view.opts(storedAt=FILE) - so you can retrieve and store work on s3, etc
 
- - add getArgvParams(required="x y z", optional="w x y")
- - add any hadoop options: 
- -- note defs and jobconf, "-D x=y", "-jobconf x=y", are different from options like "-cmdEnv x=y"
- -- also note: tasks contain steps, steps point back to views, so tasks can collect options from there
- -- did parallel this way (maps to #reducers option) -DONE
- -- general options:
- --- allow view.opts(hDefs="-D x=y ...".split(), hOpts="-x y=z ...".split())
- --- allow planner.hDefs(...), planner.hOpts(...) or --hDefs --hOpts
- --- collect planner + view opts when creating hadoop jobs
- - option(storedIn=FILE) - so you can retrieve and store work on s3, etc
-
+to add:
  - add Stream(view1, through='shell command', shipping=[f1,..,fk])
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 
  - add user-defined Reuse(FILE) ? (why do I want this again?)
