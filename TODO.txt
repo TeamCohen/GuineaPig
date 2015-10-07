@@ -13,7 +13,7 @@ working in branch 'options':
 to add:
  - add Stream(view1, through='shell command', shipping=[f1,..,fk])
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 
- - add user-defined Reuse(FILE) ? (why do I want this again?)
+ - add user-defined Reuse(FILE) ? (why do I want this again? for make-style pipelines? is it really needed?)
 
  - gpextras, for debugging:
  -- PPrint?
