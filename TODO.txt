@@ -11,24 +11,31 @@ working in branch 'options':
  - view.opts(storedAt=FILE) - so you can retrieve and store work on s3, etc
 
 to add:
- - add Stream(view1, through='shell command', shipping=[f1,..,fk])
- - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', shipping=[f1,..,fk]) 
- - add user-defined Reuse(FILE) ? (why do I want this again? for make-style pipelines? is it really needed?)
+ - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', sideviews=..., shipping=[f1,..,fk]) 
+ -- opt(1) 
+ --- define class StreamingMapReduce(MapReduce): stores the commands
+ --- make this a special case for the compiler - abstract compiler _coreCommand(self,step,gp) would just be mapper-command or reduce-command
+ -- opt(2) 
+ --- define class StreamingMapReduce(MapReduce): which knows how to doExternalMap and doExternalReduce, etc via subprocesses
+ --- this could be a gpextras view
 
+ - add user-defined Reuse(FILE) ? (why do I want this again? for make-style pipelines? is it really needed?)
  - gpextras, for debugging:
  -- PPrint?
+ -- Log?
  -- Wrap?
- -- Describe?
- -- Illustrate?
  -- WholeTextFiles?
+ -- StreamingMapReduce
 
  - efficiency
  - multiple store targets?
  - combiners: 
  -- add combiner as combiningTo=.. option of Group.  
- -- add command-line option '--doCombineRows' which sets a flag in the view, and then calls doStoreRows(), which then uses combiningTo instead of reducingTo
+ -- add command-line option '--doCombineRows' 
+ -- Group.doCombineRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.combiningTo)
+ -- Group.doStoreRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.reducingTo)
+ -- Group.reduceOrCombineRows(reducerOrCombiner) generalizes current Group.rowGenerator
  -- in hadoop compiler, set -combiner to be reduceCom modified so that '-doStoreRows' is replaced with '-doCombineRows'
- - compression -jobconf mapred.output.compress=true -jobconf mapred.output.compression.codec=org.apache.hadoop.io.compress.GzipCode
 
  - cleanup
  -- standardize view.by argument
@@ -37,7 +44,7 @@ to add:
  -- maybe add --config logging:warn,...
 
 DOCS:
- - some longer examples for the tutorial (phirl-naive?)
+ - some longer examples for the tutorial (phirl-naive? tfidfs?)
  - document planner.ship, planner.setEvaluator
 
 TODO - MAJOR
