@@ -804,7 +804,7 @@ class Join(MapReduce):
 class JoinTo(Join):
     """Special case of Join which can be used as the RHS of a pipe operator."""
 
-    def __init__(self,joinInput,by=None):
+    def __init__(self,joinInput,by=lambda x:x):
         Join.__init__(self,Jin(None,by),joinInput)
         
     def acceptInnerView(self,otherView):
