@@ -1,6 +1,4 @@
-
-
-FUNCTIONALITY
+FUNCTIONALITY - added, to document
 
 working in branch 'options':
  - add hadoop options:
@@ -10,17 +8,11 @@ working in branch 'options':
  - getArgvParams(required="x y z".split()) - throws errors if somethings missing
  - view.opts(storedAt=FILE) - so you can retrieve and store work on s3, etc
 
-in branch options->combiner:
- - efficiency
- - multiple store targets?
- - combiners: 
- -- add combiner as combiningTo=.. option of Group.  
- -- add command-line option '--doCombineRows' 
- -- Group.doCombineRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.combiningTo)
- -- Group.doStoreRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.reducingTo)
- -- Group.reduceOrCombineRows(reducerOrCombiner) generalizes current Group.rowGenerator
- -- in hadoop compiler, set -combiner to be reduceCom modified so that '-doStoreRows' is replaced with '-doCombineRows'
+working in branch options->combiner:
+ -- add combiner as combiningTo=.. option of Group,  
+ -- add tutorial/combiner-wordcount.py example
 
+FUNCTIONALITY - to add
 
 to add:
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', sideviews=..., shipping=[f1,..,fk]) 
