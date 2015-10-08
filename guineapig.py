@@ -148,17 +148,23 @@ class ReduceToCount(ReduceTo):
     """Produce the count of the number of objects that would be placed in a group."""
     def __init__(self):
         ReduceTo.__init__(self,int,by=lambda accum,val:accum+1)
+    def __str__(self):
+        return '<ReduceToCount>'
 
 class ReduceToSum(ReduceTo):
     """Produce the sum of the objects - which must be legal arguments of
     the '+' function - that would be placed in a group."""
     def __init__(self):
         ReduceTo.__init__(self,int,by=lambda accum,val:accum+val)
+    def __str__(self):
+        return '<ReduceToSum>'
 
 class ReduceToList(ReduceTo):
     """Produce a list of the objects that would be placed in a group."""
     def __init__(self):
         ReduceTo.__init__(self,list,by=lambda accum,val:accum+[val])
+    def __str__(self):
+        return '<ReduceToList>'
 
 ###############################################################################
 # abstract views
@@ -342,6 +348,10 @@ class View(object):
         for row in self.rowGenerator():
             print self.planner._serializer.toString(row)
 
+    def supportsCombiners(self):
+        """Special test to see if combiners can be used with this view."""
+        return False
+
     #
     # support the "pipe" syntax: view1 | view2
     #
@@ -441,6 +451,12 @@ class MapReduce(View):
     
     def _isReduceInputFile(self,fileName):
         return fileName.endswith('.gpri')
+
+    #use of combiners is dependent on the checkpoint
+    #being the reducer input file
+
+    def convertReduceCommandToCombineCommand(self,reduceCom):
+        assert False,'abstract method called'
 
     def checkpoint(self):
         ## the checkpoint is the reducer input file
@@ -671,28 +687,43 @@ class Group(MapReduce):
     Default outputs are tuples (x,[r1,...,rk]) where the ri's are rows
     that have 'by' values of x."""
 
-    def __init__(self,inner=None,by=lambda x:x,reducingTo=ReduceToList(),retaining=None):
+    def __init__(self,inner=None,by=lambda x:x,reducingTo=ReduceToList(),combiningTo=None,retaining=None):
         MapReduce.__init__(self,[inner],retaining)
         self.groupBy = by
         self.reducingTo = reducingTo
+        self.combiningTo = combiningTo
+        # flag which determines the behavior of the rowGenerator
+        self.reducerOrCombiner = self.reducingTo
     
     def mapPlan(self):
         plan = Plan()
         plan.append(PrereduceStep(view=self,whatToDo='doGroupMap',srcs=[self.inner.checkpoint()],dst=self.checkpoint(),why=self.explanation()))
         return plan
 
+    def supportsCombiners(self):
+        return self.combiningTo
+
+    def convertReduceCommandToCombineCommand(self,reduceCom):
+        k = reduceCom.find('doStoreRows')
+        return reduceCom[:k] + 'doCombineRows' + reduceCom[k+len('doStoreRows'):]
+
+    def doCombineRows(self):
+        self.reducerOrCombiner = self.combiningTo
+        for row in self.rowGenerator():
+            print self.planner._serializer.toString(row)
+
     def rowGenerator(self):
         """Group objects from stdin by key, yielding tuples (key,[g1,..,gn]), or appropriate reduction of that list.."""
         lastkey = key = None
-        accum = self.reducingTo.baseType()
+        accum = self.reducerOrCombiner.baseType()
         for line in sys.stdin:
             keyStr,valStr = line.strip().split("\t")
             key = self.planner._serializer.fromString(keyStr)
             val = self.planner._serializer.fromString(valStr)
             if key != lastkey and lastkey!=None: 
                 yield (lastkey,accum)
-                accum = self.reducingTo.baseType()
-            accum = self.reducingTo.reduceBy(accum, val)
+                accum = self.reducerOrCombiner.baseType()
+            accum = self.reducerOrCombiner.reduceBy(accum, val)
             lastkey = key
         if key: 
             yield (key,accum)
@@ -701,7 +732,8 @@ class Group(MapReduce):
         return self.inner.explanation() + ['group to %s' % self.tag]
 
     def __str__(self):
-        return 'Group(%s,by=%s,reducingTo=%s)' % (View.asTag(self.inner),str(self.groupBy),str(self.reducingTo)) + self.showExtras()
+        insert = ',combiningTo=%s' % str(self.combiningTo) if self.combiningTo else ''
+        return 'Group(%s,by=%s,reducingTo=%s%s)' % (View.asTag(self.inner),str(self.groupBy),str(self.reducingTo),insert) + self.showExtras()
 
     def doGroupMap(self):
         self.doStoreKeyedRows(self.inner,self.groupBy,-1)
@@ -1165,6 +1197,8 @@ class HadoopCompiler(MRCompiler):
         hcom.extend('-input',src,'-output',dst)
         hcom.extend("-mapper '%s'" % mapCom)
         hcom.extend("-reducer '%s'" % reduceCom)
+        if task.reduceStep.view.supportsCombiners():
+            hcom.extend("-combiner '%s'" % task.reduceStep.view.convertReduceCommandToCombineCommand(reduceCom))
         self._extendWithHadoopOptions(hcom,gp,task)
         return [ self._hadoopCleanCommand(gp,dst), hcom.asEcho(), hcom.asString() ]
         

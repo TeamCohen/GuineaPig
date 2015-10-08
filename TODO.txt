@@ -10,6 +10,18 @@ working in branch 'options':
  - getArgvParams(required="x y z".split()) - throws errors if somethings missing
  - view.opts(storedAt=FILE) - so you can retrieve and store work on s3, etc
 
+in branch options->combiner:
+ - efficiency
+ - multiple store targets?
+ - combiners: 
+ -- add combiner as combiningTo=.. option of Group.  
+ -- add command-line option '--doCombineRows' 
+ -- Group.doCombineRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.combiningTo)
+ -- Group.doStoreRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.reducingTo)
+ -- Group.reduceOrCombineRows(reducerOrCombiner) generalizes current Group.rowGenerator
+ -- in hadoop compiler, set -combiner to be reduceCom modified so that '-doStoreRows' is replaced with '-doCombineRows'
+
+
 to add:
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', sideviews=..., shipping=[f1,..,fk]) 
  -- opt(1) 
@@ -26,16 +38,6 @@ to add:
  -- Wrap?
  -- WholeTextFiles?
  -- StreamingMapReduce
-
- - efficiency
- - multiple store targets?
- - combiners: 
- -- add combiner as combiningTo=.. option of Group.  
- -- add command-line option '--doCombineRows' 
- -- Group.doCombineRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.combiningTo)
- -- Group.doStoreRows() clones View.doStoreRows() but calls reduceOrCombineRows(self.reducingTo)
- -- Group.reduceOrCombineRows(reducerOrCombiner) generalizes current Group.rowGenerator
- -- in hadoop compiler, set -combiner to be reduceCom modified so that '-doStoreRows' is replaced with '-doCombineRows'
 
  - cleanup
  -- standardize view.by argument
