@@ -1,3 +1,9 @@
+ROBUSTNESS/ERRORS/DOCS:
+ -- should I round-trip serialized outputs, to make sure they can be read back in?
+ -- better docs for Augment?
+ -- document it needs unix, python 2.7
+ -- document lack of UDF's
+
 FUNCTIONALITY - added, to document
 
 working in branch 'options':
