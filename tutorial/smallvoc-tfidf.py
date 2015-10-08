@@ -3,11 +3,11 @@ from guineapig import *
 # compute TFIDF in Guineapig
 #
 # Optimized to use sideviews for the normalized weights and
-# docFrequencies, and to use compression.  Note that sideviews can't
-# be compressed if you want to use the standard GPig.rowsOf() loading
-# methods, to this is also something of a test case for the hadoop
-# options. Also includes a storeAt option to export the final weighted
-# terms.
+# docFrequencies, combiners, and compression.  Note that sideviews
+# can't be compressed if you want to use the standard GPig.rowsOf()
+# loading methods, so this is also of a test case for the hadoop
+# options. Also includes the new storeAt option, to export the final
+# weighted terms.
 # 
 # sample invocation:
 # % python smallvoc-tfidf.py --opts target:hadoop,parallel:100,echo:1 \
@@ -37,12 +37,16 @@ class TFIDF(Planner):
 
     #compute document frequency and inverse doc freq
     docFreq = Distinct(data) \
-        | Group(by=lambda (docid,term):term, retaining=lambda(docid,term):docid, reducingTo=ReduceToCount())
+        | Group(by=lambda (docid,term):term, \
+                retaining=lambda x:1, \
+                combiningTo=ReduceToSum(), \
+                reducingTo=ReduceToSum())
+    docFreq.opts(hopts=UNCOMPRESSED,parallel=20)
 
     ndoc = Map(data, by=lambda (docid,term):docid) \
         | Distinct() \
-        | Group(by=lambda row:'ndoc', reducingTo=ReduceToCount())
-    ndoc.opts(hopts=UNCOMPRESSED)
+        | Group(by=lambda row:'ndoc', retaining=lambda x:1, reducingTo=ReduceToSum(), combiningTo=ReduceToSum())
+    ndoc.opts(hopts=UNCOMPRESSED,parallel=20)
 
     inverseDocFreq = Augment(docFreq, sideview=ndoc, loadedBy=lambda v:GPig.onlyRowOf(v)) \
         | Map(by=lambda((term,df),(dummy,ndoc)):(term,math.log(ndoc/df)))
@@ -53,10 +57,11 @@ class TFIDF(Planner):
         | Map(by=lambda ((docid,term),idfDict):(docid,term,idfDict[term]))
 
     #normalize
-    norm = Group( udocvec, by=lambda(docid,term,weight):docid, 
-                           retaining=lambda(docid,term,weight):weight*weight,
-                           reducingTo=ReduceToSum() )
-    norm.opts(hopts=UNCOMPRESSED)
+    norm = Group(udocvec, 
+                 by=lambda(docid,term,weight):docid, 
+                 retaining=lambda(docid,term,weight):weight*weight,
+                 reducingTo=ReduceToSum() )
+    norm.opts(hopts=UNCOMPRESSED,parallel=20)
 
     docvec = Augment(udocvec, sideview=norm, loadedBy=loadDictView) \
         | Map( by=lambda ((docid,term,weight),normDict): (docid,term,weight/math.sqrt(normDict[docid])))

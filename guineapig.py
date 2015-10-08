@@ -24,7 +24,7 @@ class GPig(object):
     SORT_COMMAND = 'LC_COLLATE=C sort'  # use standard ascii ordering, not locale-specific one
     HADOOP_LOC = 'hadoop'               # assume hadoop is on the path at planning time
     MY_LOC = 'guineapig.py'             # the name of this file
-    VERSION = '1.3.3'
+    VERSION = '1.3.4'
     COPYRIGHT = '(c) William Cohen 2014,2015'
 
     #Global options for Guinea Pig can be passed in with the --opts
@@ -92,7 +92,7 @@ class GPig(object):
 
     @staticmethod
     def rowsOf(view):
-        """Iterator over the rows in a view."""
+        """Return a generator that iterates over the rows in a view."""
         for line in open(view.distributableFile()):
             yield view.planner._serializer.fromString(line.strip())
 
@@ -405,6 +405,7 @@ class Reader(View):
 
     def __init__(self,src):
         View.__init__(self)
+        assert src,'argument to Reader should not be null' 
         self.src = src
         self.inners = []
 
@@ -709,12 +710,15 @@ class Group(MapReduce):
 
     def doCombineRows(self):
         self.reducerOrCombiner = self.combiningTo
-        for row in self.rowGenerator():
-            print self.planner._serializer.toString(row)
+        for key,val in self.rowGenerator():
+            keyStr = self.planner._serializer.toString(key)
+            valStr = self.planner._serializer.toString(val)
+            print "%s\t%s" % (keyStr,valStr)
 
     def rowGenerator(self):
         """Group objects from stdin by key, yielding tuples (key,[g1,..,gn]), or appropriate reduction of that list.."""
         lastkey = key = None
+        #we re-use this algorithm for both combiners and reduces
         accum = self.reducerOrCombiner.baseType()
         for line in sys.stdin:
             keyStr,valStr = line.strip().split("\t")
@@ -1180,7 +1184,7 @@ class HadoopCompiler(MRCompiler):
         return ['rm -f %s' % localCopy, '%s fs -getmerge %s %s' % (GPig.HADOOP_LOC,maybeRemoteCopy,localCopy)]
 
     def simpleMapCommands(self,task,gp,mapCom,src,dst):
-        assert src,'Wrap not supported for hadoop'
+        assert src,'undefined src for this view?'
         hcom = self.HadoopCommandBuf(gp,task)
         hcom.extendDef('-D','mapred.reduce.tasks=0')
         hcom.extend('-cmdenv','PYTHONPATH=.')
