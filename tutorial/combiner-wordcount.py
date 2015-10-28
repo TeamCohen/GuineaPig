@@ -9,7 +9,8 @@ def tokens(line):
 #always subclass Planner
 class WordCount(Planner):
 
-    wc = ReadLines('corpus.txt') | Flatten(by=tokens) | Group(retaining=lambda x:1, reducingTo=ReduceToSum(), combiningTo=ReduceToSum())
+    wc = ReadLines('corpus.txt') | Flatten(by=tokens) \
+        | Group(retaining=lambda x:1, reducingTo=ReduceToSum(), combiningTo=ReduceToSum())
 
 # always end like this
 if __name__ == "__main__":

@@ -1,26 +1,17 @@
+TODO: 
+ - writeup smallvoc-tfidf.py as an example
+ - 
+
 ROBUSTNESS/ERRORS/DOCS:
  -- should I round-trip serialized outputs, to make sure they can be read back in?
  -- better docs for Augment?
  -- document it needs unix, python 2.7
  -- document lack of UDF's
 
-FUNCTIONALITY - added, to document
-
-working in branch 'options':
- - add hadoop options:
- -- planner-level defaults: --hopts "..." --hdefs "..." at command-line
- -- planner-level defaults: planner.hopts([..]), planner.hdefs([..]), ...
- -- view-level: opts(hopts=[...], hdefs=[...])
- - getArgvParams(required="x y z".split()) - throws errors if somethings missing
- - view.opts(storedAt=FILE) - so you can retrieve and store work on s3, etc
-
-working in branch options->combiner:
- -- add combiner as combiningTo=.. option of Group,  
- -- add tutorial/combiner-wordcount.py example
-
 FUNCTIONALITY - to add
 
 to add:
+ - MapPartitions(iteratorGenerator): iteratorGenerator(inputIterator) returns an iterator over mapped items
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', sideviews=..., shipping=[f1,..,fk]) 
  -- opt(1) 
  --- define class StreamingMapReduce(MapReduce): stores the commands
