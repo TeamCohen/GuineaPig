@@ -51,14 +51,6 @@ class GPig(object):
     COMPUTED_OPTION_DEFAULTS = {'streamJar':defaultJar, 'viewdir':defaultViewDir}
 
     @staticmethod
-    def getCompiler(target):
-        """Return the compiler object used to convert AbstractMapReduceTasks
-        to executable commands."""
-        if target=='shell': return ShellCompiler()
-        elif target=='hadoop': return HadoopCompiler()
-        else: assert 'illegal compilation target '+target
-
-    @staticmethod
     def getArgvParams(required=[]): 
         """Return a dictionary holding the argument of the --params option in
         sys.argv.  The argument requiredParams, if present, is a list
@@ -297,7 +289,7 @@ class View(object):
 
     def storagePlan(self):
         """A plan to store the view."""
-        return self.planner.buildRecursiveStoragePlan(self)
+        return self.planner._buildRecursiveStoragePlan(self)
 
     def nonrecursiveStoragePlan(self):
         """Materialize the relation, assuming that there are no descendent
@@ -936,7 +928,7 @@ class Plan(object):
         self.buildTasks()
         logging.info("%d steps converted to %d abstract map-reduce tasks" % (len(self.steps),len(self.tasks)))
         script = []
-        taskCompiler = GPig.getCompiler(gp.opts['target']) 
+        taskCompiler = gp._getCompiler(gp.opts['target']) 
         for task in self.tasks:
             #print 'compiling',task
             script += taskCompiler.compile(task,gp)
@@ -1321,8 +1313,11 @@ class Planner(object):
             self.opts[key] = type(self.opts[key])
 
         #Provide a default serializer
-
         self._serializer = RowSerializer()
+
+        #Provide a default mapping from 'target' strings to Python
+        #classes which implement compilers for that target
+        self._compilerRegistry = {'shell':ShellCompiler, 'hadoop':HadoopCompiler}
 
         #These are views that aren't associated with class variable,
         #but are instead named automatically - ie, inner views with no
@@ -1342,73 +1337,16 @@ class Planner(object):
         self.ship(GPig.MY_LOC)
         self.ship(self._gpigSourceFile)
 
-    def setup(self):
-        """Initialize planner, and views used by the planner.  This has to be
-        done after the planner is fully configured by adding views."""
-
-        self.reusableViews = {}
-        # make sure view directory is valid
-        if self.opts['target']=='shell' and not os.path.exists(self.opts['viewdir']):
-            logging.info('creating view directory ' + self.opts['viewdir'])
-            os.makedirs(self.opts['viewdir'])
-        elif self.opts['target']=='hadoop':
-            p = urlparse.urlparse(self.opts['viewdir'])
-            if not p.path.startswith("/"):
-                logging.warn('hadoop viewdir should be absolute path: will try prefixing /user/$LOGNAME')
-                username = os.environ.get('LOGNAME','me')
-                self.opts['viewdir'] = '/user/'+username+'/'+self.opts['viewdir']
-                logging.warn('viewdir is set to '+self.opts['viewdir'])
-
-        # Add 'tag' and planner fields to each view
-        for vname in self.listViewNames():
-            v = self.getView(vname)
-            v.tag = vname
-            v.planner = self
-        def tagUnnamedViews(v,basename,index,depth):
-            assert v,'null inner view for '+basename
-            if not v.planner:
-                v.planner = self
-                autoname = '%s_%d_%s' % (basename,depth,index)
-                self._setView(autoname,v)
-                for i,inner in enumerate(v.inners + v.sideviews):
-                    tagUnnamedViews(inner,vname,i,depth+1)
-        for vname in self.listViewNames():
-            v = self.getView(vname)
-            for i,inner in enumerate(v.inners + v.sideviews):
-                tagUnnamedViews(inner,vname,i,1)
-
-        # Add caching options as needed
-        for vname in self.listViewNames():
-            v = self.getView(vname)
-            v.enforceStorageConstraints()
-
     #
     # utils
     # 
-            
-
-    def getView(self,str,mustExist=False):
-        """Find the defined relation named str, and if necessary bind its
-        planner and tag appropriately."""
-        v = self.__class__.__dict__.get(str) or self.__dict__.get(str) or self._autoNamedViews.get(str)
-        if mustExist: assert v,'cannot find a view named '+str
-        return v
 
     def _setView(self,str,view):
         """Internal use only: allow the view to be retreived by name later."""
         view.tag = str
         self._autoNamedViews[str] = view
 
-    def listViewNames(self):
-        def namedViews(d): return [vname for vname in d.keys() if isinstance(self.getView(vname),View)]
-        userNamedViews =  namedViews(self.__class__.__dict__) + namedViews(self.__dict__)
-        return userNamedViews + self._autoNamedViews.keys()
-
-    #
-    # planning
-    # 
-
-    def buildRecursiveStoragePlan(self,view):
+    def _buildRecursiveStoragePlan(self,view):
         """Called by view.storagePlan.""" 
         #figure out what to reuse - starting with what the user specified
         storedViews = dict(self.reusableViews)
@@ -1474,6 +1412,68 @@ class Planner(object):
                     storedViews[inner.tag] = ReuseView(inner)
         return seq
 
+    ##############################################################################
+    # external interface to Planner
+    ##############################################################################
+
+    def setup(self):
+        """Initialize planner, and views used by the planner.  This has to be
+        done after the planner is fully configured by adding views."""
+
+        self.reusableViews = {}
+        # make sure view directory is valid
+        if self.opts['target']=='shell' and not os.path.exists(self.opts['viewdir']):
+            logging.info('creating view directory ' + self.opts['viewdir'])
+            os.makedirs(self.opts['viewdir'])
+        elif self.opts['target']=='hadoop':
+            p = urlparse.urlparse(self.opts['viewdir'])
+            if not p.path.startswith("/"):
+                logging.warn('hadoop viewdir should be absolute path: will try prefixing /user/$LOGNAME')
+                username = os.environ.get('LOGNAME','me')
+                self.opts['viewdir'] = '/user/'+username+'/'+self.opts['viewdir']
+                logging.warn('viewdir is set to '+self.opts['viewdir'])
+
+        # Add 'tag' and planner fields to each view
+        for vname in self.listViewNames():
+            v = self.getView(vname)
+            v.tag = vname
+            v.planner = self
+        def tagUnnamedViews(v,basename,index,depth):
+            assert v,'null inner view for '+basename
+            if not v.planner:
+                v.planner = self
+                autoname = '%s_%d_%s' % (basename,depth,index)
+                self._setView(autoname,v)
+                for i,inner in enumerate(v.inners + v.sideviews):
+                    tagUnnamedViews(inner,vname,i,depth+1)
+        for vname in self.listViewNames():
+            v = self.getView(vname)
+            for i,inner in enumerate(v.inners + v.sideviews):
+                tagUnnamedViews(inner,vname,i,1)
+
+        # Add caching options as needed
+        for vname in self.listViewNames():
+            v = self.getView(vname)
+            v.enforceStorageConstraints()
+
+
+
+    #
+    # accessing views
+    # 
+
+    def getView(self,str,mustExist=False):
+        """Find the defined relation named str, and if necessary bind its
+        planner and tag appropriately."""
+        v = self.__class__.__dict__.get(str) or self.__dict__.get(str) or self._autoNamedViews.get(str)
+        if mustExist: assert v,'cannot find a view named '+str
+        return v
+
+    def listViewNames(self):
+        def namedViews(d): return [vname for vname in d.keys() if isinstance(self.getView(vname),View)]
+        userNamedViews =  namedViews(self.__class__.__dict__) + namedViews(self.__dict__)
+        return userNamedViews + self._autoNamedViews.keys()
+
     #
     # dealing with the file storage system and related stuff
     #
@@ -1507,6 +1507,15 @@ class Planner(object):
         by Python's 'repr' function."""
         self._serializer.evaluator = rowEvaluator
         return self
+
+    def registerCompiler(self,compilerName,compilerClass):
+        self._compilerRegistry[compilerName] = compilerClass
+
+    def _getCompiler(self,target):
+        """Return the compiler object used to convert AbstractMapReduceTasks
+        to executable commands."""
+        assert target in self._compilerRegistry, 'illegal compilation target '+target
+        return self._compilerRegistry[target]()
 
     #
     # rest of the API for the planner
@@ -1584,7 +1593,8 @@ class Planner(object):
                 for w in task.explanation():
                     print ' - | ',w
                 print ' - +' + '-' * 20, 'commands', '-' * 20
-                for c in GPig.getCompiler(self.opts['target']).compile(task,self):
+                script = self._getCompiler(self.opts['target']).compile(task,self)
+                for c in script:
                     if not c.startswith("echo"):
                         print ' - | ',c
             return
