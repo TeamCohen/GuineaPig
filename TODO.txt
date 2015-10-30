@@ -1,8 +1,8 @@
 TODO: 
- - writeup smallvoc-tfidf.py as an example
- - 
+ - mrs_gp: seems to get slow as data accumulates in reducer queues.  why? 
 
 ROBUSTNESS/ERRORS/DOCS:
+ - writeup smallvoc-tfidf.py as an example
  -- should I round-trip serialized outputs, to make sure they can be read back in?
  -- better docs for Augment?
  -- document it needs unix, python 2.7

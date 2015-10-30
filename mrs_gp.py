@@ -130,7 +130,7 @@ def accumulateReduceInputs(reducerQ,reducerBuf):
     input buffer.  Items in the buffer are grouped by key."""
     while True:
         (k,line) = reducerQ.get()
-        reducerBuf[k] += [line]
+        reducerBuf[k].append(line)
         reducerQ.task_done()
 
 def sendReduceInputs(reducerBuf,reducePipe,j):
