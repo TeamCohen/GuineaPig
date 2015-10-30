@@ -2,6 +2,9 @@
 # (C) Copyright 2014, 2015 William W. Cohen.  All rights reserved.
 ##############################################################################
 
+import sys
+import os
+
 from guineapig import *
 
 class ReadCSV(Reader):
@@ -75,3 +78,45 @@ class LogProgress(Log):
             if (rowIndex % interval)==0:
                 print >> sys.stderr, "%s: %d rows done" % (msg,rowIndex)
         Log.__init__(self, inner=inner, logfun=logprogress)
+
+
+##############################################################################
+# extension to use mrs_gp, a local map-reduce for streaming intended
+# mainly for use on ramdisks
+##############################################################################
+
+class MRSCompiler(MRCompiler):
+    """Compile tasks to commands that are executable on most Unix shells,
+    with the mrs_gp.py program.
+    """
+
+    def __init__(self):
+        self.mrs_loc = 'mrs_gp'
+
+    def distributeCommands(self,task,gp,maybeRemoteCopy,localCopy):
+        """Distribute the remote copy to the local directory."""
+        return ['cp -f %s %s || echo warning: the copy failed!' % (maybeRemoteCopy,localCopy)]
+
+    def simpleMapCommands(self,task,gp,mapCom,src,dst):
+        """A map-only job with zero or one inputs."""
+        assert src,'undefined src for this view? you may be using Wrap with target:mrs'
+        return [ "%s --input %s --output %s --mapper '%s'" % (self.mrs_loc,src,dst,mapCom) ]
+        
+    def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
+        """A map-reduce job with one input."""
+        p = task.reduceParallel(gp)
+        return [ "%s --input %s --output %s --mapper '%s'  --numReduceTasks %d --reducer '%s'" \
+                 % (self.mrs_loc,src,dst,mapCom,p,reduceCom) ]
+
+    def joinCommands(self,task,gp,mapComs,reduceCom,srcs,midpoint,dst):
+        """A map-reduce job with several inputs."""
+        p = task.reduceParallel(gp)
+        def midi(i): return midpoint + '-' + str(i)
+        subplan = []
+        for i in range(len(srcs)):
+            subplan.append("%s --input %s --output %s --mapper '%s'" \
+                           % (self.mrs_loc,srcs[i],mid(i),mapComs[i]))
+        allMidpoints = ",".join([mid(i) for i in range(len(srcs))])
+        subplan.append("%s --joinInputs %s --output %s --mapper cat --numReduceTasks %d --reducer '%s'" \
+                       % (self.mrs_loc,allMidpoints,dst,p,reduceCom))
+        return subplan

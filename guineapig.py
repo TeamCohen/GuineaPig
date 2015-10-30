@@ -1176,7 +1176,7 @@ class HadoopCompiler(MRCompiler):
         return ['rm -f %s' % localCopy, '%s fs -getmerge %s %s' % (GPig.HADOOP_LOC,maybeRemoteCopy,localCopy)]
 
     def simpleMapCommands(self,task,gp,mapCom,src,dst):
-        assert src,'undefined src for this view?'
+        assert src,'undefined src for this view? you may be using Wrap with target:hadoop'
         hcom = self.HadoopCommandBuf(gp,task)
         hcom.extendDef('-D','mapred.reduce.tasks=0')
         hcom.extend('-cmdenv','PYTHONPATH=.')
