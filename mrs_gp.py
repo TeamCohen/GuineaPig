@@ -7,6 +7,7 @@ import collections
 import subprocess
 import time
 import Queue
+import shutil
 
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
 # multi-threading map-reduce, to be used with inputs/outputs which are
@@ -25,7 +26,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     are shell commands, as in Hadoop streaming.  Both indir and outdir
     are directories."""
 
-    setupFiles(indir,outdir)
+    infiles = setupFiles(indir,outdir)
 
     # Set up a place to save the inputs to K reducers - each of which
     # is a buffer bj, which maps a key to a list of values associated
@@ -83,7 +84,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
 
-    setupFiles(indir,outdir)
+    infiles = setupFiles(indir,outdir)
 
     # start the mappers - each of which is a process that reads from
     # an input file, and outputs to the corresponding output file
@@ -91,26 +92,25 @@ def maponly(indir,outdir,mapper):
     logging.info('starting mapper processes')
     activeMappers = set()
     for fi in infiles:
-        mapPipe = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=open(outdir + "/" + fi))
+        mapPipe = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=open(outdir + "/" + fi, 'w'))
         activeMappers.add(mapPipe)
 
-    #wait for the map tasks
-    while activeMappers:
-        logging.info('polling %d mappers' % len(activeMappers))
-        for mapPipe in activeMappers:
-            if mapPipe.poll():
-                activeMappers.discard(mapPipe)
-                logging.info('finished process %s' % str(mapPipe))
-        time.sleep(0.5)
+    #wait for the map tasks to finish
+    for mapPipe in activeMappers:
+        mapPipe.wait()
 
 #
 # subroutines
 #
 
 def setupFiles(indir,outdir):
-    infiles = [f for f in os.listdir(indir) if not f=='CVS']  #skip CVS dir for my tests
-    logging.info('opening %d files from %s' % (len(infiles),indir))
+    infiles = [f for f in os.listdir(indir)]
+    if os.path.exists(outdir):
+        logging.warn('removing %s' % (outdir))
+        shutil.rmtree(outdir)
     os.makedirs(outdir)
+    logging.info('inputs: %d files from %s' % (len(infiles),indir))
+    return infiles
 
 #
 # routines attached to threads

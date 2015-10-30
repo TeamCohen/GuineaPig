@@ -23,10 +23,8 @@ to add:
  - add user-defined Reuse(FILE) ? (why do I want this again? for make-style pipelines? is it really needed?)
  - gpextras, for debugging:
  -- PPrint?
- -- Log?
  -- Wrap?
  -- WholeTextFiles?
- -- StreamingMapReduce
 
  - cleanup
  -- standardize view.by argument
