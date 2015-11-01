@@ -7,7 +7,7 @@
 
 
 RAM=/mnt/ramdisk/mrs/
-K=1
+K=20
 BIGFILE=/afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_test.txt
 #BIGFILE=/afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_train.txt
 DIR=$(RAM)
@@ -56,11 +56,13 @@ simple-ram-times-sweep-k:
 	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks 20
 
 # for test data - 100M
-# k	shard	learn	stream.10k
-# 1	5.7	 3:44
-# 3	6.7	 8:12
-# 10	8.5	14:02
-# 20	9.0	20:40	
+#     --train not 
+#      version 1 	  version 2  	    
+# k	shard	learn	shard	  learn
+# 1	5.7	 3:44	2.8	  3:05
+# 3	6.7	 8:12	3.0	  3:38	  
+# 10	8.5	14:02	
+# 20	9.0	20:40	3.5	  7:10
 
 learn-ram-times:
 	echo sharding

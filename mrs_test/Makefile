@@ -1,6 +1,7 @@
 #DIR=/mnt/ramdisk/mrs/
 DIR=.
-MRS=python ../mrs_gp.py
+MRS=jython ../mrs_gp.py
+K=10
 
 clean:
 	rm -rf sharded unsharded-copy sharded-copy 
@@ -22,15 +23,15 @@ sharded-copy: sharded
 
 sharded: unsharded/train.txt
 	echo checking a multi-process map-reduce task
-	$(MRS) --input $(DIR)/unsharded --output $(DIR)/sharded --mapper cat --reducer cat --numReduceTasks 10
+	$(MRS) --input $(DIR)/unsharded --output $(DIR)/sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo checking file sizes
 	wc unsharded/* 
 	wc sharded/*
 
 events: sharded
 	echo checking job of training naive bayes in parallel
-	$(MRS) 	--input $(DIR)/sharded --output $(DIR)/events --numReduceTasks 10 \
-		--mapper 'python streamNaiveBayesLearner.py --train' \
+	$(MRS) 	--input $(DIR)/sharded --output $(DIR)/events --numReduceTasks $(K) \
+		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
 		--reducer 'python sum-events.py'
 
 events.txt: unsharded/train.txt

@@ -1,5 +1,6 @@
 TODO: 
- -- mrs_gp runs at way less than 100% capacity, why? just too much switching around between processers in reducing?
+ -- mrs_gp runs at way less than 100% capacity, why? just too much switching around between processers in reducing? GIL?
+ -- jython version doesn't halt - it doesn't kill off the daemon threads ? 
 
 Possible rewrites:
 
