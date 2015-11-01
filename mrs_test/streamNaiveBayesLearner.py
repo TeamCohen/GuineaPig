@@ -1,22 +1,31 @@
 import sys
 import math
+import logging
 
 class EventCounter(object):
     def __init__(self,maxSize=1000):
         self._ctr = {}
         self.maxSize = maxSize
+        self.size = 0
     def get(self,event):
         if event in self._ctr: return self._ctr[event]
         else: return 0
     def inc(self,event,delta=1):
-        if event in self._ctr: self._ctr[event] += delta
-        else: self._ctr[event] = delta
-        if self.maxSize and len(self._ctr)>self.maxSize:
+        if event in self._ctr: 
+            self._ctr[event] += delta
+        else: 
+            self._ctr[event] = delta
+            self.size += 1
+        if self.maxSize and self.size>self.maxSize:
             self.flush()
     def flush(self):
+        k = 0
         for event,count in self._ctr.items():
             print "%s\t%g" % (event,count)
+            k += 1
+            if not k % 10000: logging.info('flushed %d/%d items = %.3f%%' % (k,self.size, ((100.0*k)/self.size)))
         self._ctr = {}
+        self.size = 0
     def load(self,file):
         self._ctr = {}
         for line in open(file):
@@ -62,16 +71,29 @@ def testLine(line,ec,label,vocabSize):
     print '%f\t%s' % ((score-nonScore),trueLab)
 
 if __name__=="__main__":
+    logging.basicConfig(level=logging.INFO)
     if len(sys.argv)>1 and sys.argv[1] == '--train':
+        logging.info('started training')
         ec = EventCounter(maxSize=0)
+        k = 0
         for line in sys.stdin:
             trainLine(line.strip(),ec)
+            k += 1
+            if not k % 1000: logging.info('processed '+str(k)+' lines')
+        logging.info('finished training')
         ec.flush()
+        logging.info('flushed')
     elif len(sys.argv)>1 and sys.argv[1] == '--streamTrain':
+        logging.info('started streamTrain')
         ec = EventCounter(maxSize=int(sys.argv[2]))
+        k = 0
         for line in sys.stdin:
             trainLine(line.strip(),ec)
+            k += 1
+            if not k % 1000: logging.info('processed '+str(k)+' lines from '+sys.argv[1])
+        logging.info('finished streamTrain buf size '+sys.argv[2])
         ec.flush()
+        logging.info('flushed '+sys.argv[1])
     elif len(sys.argv)>3 and sys.argv[1] == '--test':
         file = sys.argv[2]
         ec = EventCounter(maxSize=0)

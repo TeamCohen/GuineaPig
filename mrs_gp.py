@@ -123,7 +123,9 @@ def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
         k = key(line)
         h = hash(k) % numReduceTasks    # send to reducer buffer h
         reducerQs[h].put((k,line))
+    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' finishes reading, now waiting')
     mapPipe.wait()                      # wait for termination of mapper process
+    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done waiting')
 
 def accumulateReduceInputs(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer

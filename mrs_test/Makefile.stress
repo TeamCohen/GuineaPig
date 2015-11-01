@@ -7,16 +7,17 @@
 
 
 RAM=/mnt/ramdisk/mrs/
-K=30
+K=1
 BIGFILE=/afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_test.txt
 #BIGFILE=/afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_train.txt
 DIR=$(RAM)
+#NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 10000'
 NBCOUNT='python streamNaiveBayesLearner.py --train'
 SUM='python sum-events.py'
 
 MRS=python ../mrs_gp.py
 
-make simple-disk-times:
+simple-disk-times:
 	echo == disk stream - about 3 sec for 100M, 2:03 for 1G
 	time cat $(BIGFILE) | python fixrcv.py > bigfile1/test.txt
 	echo == sharding disk-disk - about 10-11 sec for 100M with K=10, 1:18 for 1G with K=5
@@ -24,23 +25,25 @@ make simple-disk-times:
 	echo == copy sharded disk-disk - about 8-10 sec	for 100M with K=10, 1:16 for 1G with K=5
 	time $(MRS) --input bigfile1-sharded --output bigfile1-copy --mapper cat --reducer cat --numReduceTasks $(K)
 
-make simple-ram-times:
+simple-ram-times:
 	echo == disk to ram stream - about 3 sec for 100M, 3:19 for 1G with K=5
 	time cat /afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_test.txt | python fixrcv.py > $(RAM)/bigfile1/test.txt
 	echo == sharding ram-ram - about 10-11 sec for 100M , 0:08 for 1G with K=5
 	time $(MRS) --input $(RAM)/bigfile1 --output $(RAM)/bigfile1-sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo == copy sharded ram-ram - about 8-10 sec for 100M, 0:07 for 1G with K=5	
-	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks $(K)
+	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks $(K)        
+	echo == resharded ram-ram - about 8.7 sec for 100M with k=30
+	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks `expr $(K) / 2`
 
 # for train data - 1G 
 # k	shard	copy
-# 1	5.7	5.4
+# 1	5.7	5.4   
 # 3	7.7	7.3	
 # 5	7.9	7.5
 # 10	9.0	8.2
-# 20	9.7	8.8
+# 20	9.7	8.8	
 
-make simple-ram-times-sweep-k:
+simple-ram-times-sweep-k:
 	time $(MRS) --input $(RAM)/bigfile1 --output $(RAM)/bigfile1-sharded --mapper cat --reducer cat --numReduceTasks 1
 	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks 1
 	time $(MRS) --input $(RAM)/bigfile1 --output $(RAM)/bigfile1-sharded --mapper cat --reducer cat --numReduceTasks 3
@@ -53,14 +56,13 @@ make simple-ram-times-sweep-k:
 	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks 20
 
 # for test data - 100M
-# k	shard	learn
-# 1	
-# 3	
-# 5	7.9
-# 10	
-# 20	
+# k	shard	learn	stream.10k
+# 1	5.7	 3:44
+# 3	6.7	 8:12
+# 10	8.5	14:02
+# 20	9.0	20:40	
 
-make learn-ram-times:
+learn-ram-times:
 	echo sharding
 	time $(MRS) --input $(RAM)/bigfile1 --output $(RAM)/bigfile1-sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
