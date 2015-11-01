@@ -1,6 +1,6 @@
 #DIR=/mnt/ramdisk/mrs/
 DIR=.
-MRS=jython ../mrs_gp.py
+MRS=python ../mrs_gp.py
 K=10
 
 clean:

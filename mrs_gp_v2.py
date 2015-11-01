@@ -32,18 +32,21 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
 
     # Set up a place to save the inputs to K reducers - each of which
     # is a buffer bj, which maps a key to a list of values associated
-    # with that key.  To fill these buffers we also have K threads tj
-    # to accumulate inputs, and K Queue's qj for the threads to read
-    # from.
+    # with that key.  To fill these buffers we will also have K
+    # threads tj to accumulate inputs, and K Queue's qj for the
+    # threads to read from.
 
     logging.info('starting reduce buffer queues')
     reducerQs = []        # task queues to join with later 
     reducerBuffers = []   # data to send to reduce processes later 
+    reducerQThreads = []
     for j in range(numReduceTasks):
         qj = Queue.Queue()
         bj = collections.defaultdict(list)
         reducerQs.append(qj)
         reducerBuffers.append(bj)
+        tj = threading.Thread(target=acceptReduceInputs, args=(qj,bj))
+        reducerQThreads.append(tj)
 
     # start the mappers - each of which is a process that reads from
     # an input file, and a thread that passes its outputs to the
@@ -62,22 +65,14 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         mappers.append(si)
 
     #wait for the map tasks, and to empty the queues
-    joinAll(mappers,'mappers')          # no more tasks will be added to the queues
-
-    #read from the reducer queues
-    logging.info('starting reduce queue readers')
-    for j in range(numReduceTasks):
-        qj = reducerQs[j]
-        bj = reducerBuffers[j]
-        tj = threading.Thread(target=acceptReduceInputs, args=(qj,bj))
+    logging.info('starting reduce processes and threads to feed these processes')
+    for tj in reducerQThreads:
         tj.start()
-
-    joinAll(reducerQs,'reduce queues')  # the queues have been emptied
+    joinAll(mappers,'mappers')          # no more tasks will be added to the queues
 
     # run the reduce processes, each of which is associated with a
     # thread that feeds it inputs from the j's reduce buffer.
 
-    logging.info('starting reduce processes and threads to feed these processes')
     reducers = []
     for j in range(numReduceTasks):    
         fpj = open("%s/part%05d" % (outdir,j), 'w')
@@ -87,6 +82,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         reducers.append(uj)
 
     #wait for the reduce tasks
+    joinAll(reducerQs,'reduce queues')
     joinAll(reducers,'reducers')
 
 def maponly(indir,outdir,mapper):
@@ -161,7 +157,7 @@ def accumulateReduceInputs_v1(reducerQ,reducerBuf):
 def acceptReduceInputs(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer
     input buffer.  Items in the buffer are grouped by key."""
-    while not reducerQ.empty():
+    while True:
         shufbuf = reducerQ.get()
         nLines = 0
         nKeys = 0

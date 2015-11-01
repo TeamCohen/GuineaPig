@@ -42,8 +42,8 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         bj = collections.defaultdict(list)
         reducerQs.append(qj)
         reducerBuffers.append(bj)
-        tj = threading.Thread(target=accumulateReduceInputs, args=(qj,bj))
-        tj.daemon = True                # loops forever, will be killed on exit
+        tj = threading.Thread(target=acceptReduceInputs, args=(qj,bj))
+        tj.daemon = True
         tj.start()
 
     # start the mappers - each of which is a process that reads from
@@ -64,7 +64,6 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
 
     #wait for the map tasks, and to empty the queues
     joinAll(mappers,'mappers')          # no more tasks will be added to the queues
-    joinAll(reducerQs,'reduce queues')  # the queues have been emptied
 
     # run the reduce processes, each of which is associated with a
     # thread that feeds it inputs from the j's reduce buffer.
@@ -79,6 +78,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         reducers.append(uj)
 
     #wait for the reduce tasks
+    joinAll(reducerQs,'reduce queues')  # the queues have been emptied
     joinAll(reducers,'reducers')
 
 def maponly(indir,outdir,mapper):
@@ -116,7 +116,7 @@ def setupFiles(indir,outdir):
 # routines attached to threads
 #
 
-def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
+def shuffleMapOutputs_v1(mapper,mapPipe,reducerQs,numReduceTasks):
     """Thread that takes outputs of a map pipeline, hashes them, and
     sticks them on the appropriate reduce queue."""
     for line in mapPipe.stdout:
@@ -127,12 +127,41 @@ def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
     mapPipe.wait()                      # wait for termination of mapper process
     logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done waiting')
 
-def accumulateReduceInputs(reducerQ,reducerBuf):
+def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
+    """Thread that takes outputs of a map pipeline, hashes them, and
+    sticks them on the appropriate reduce queue."""
+    #maps shard index to a key->list defaultdict
+    shufbuf = collections.defaultdict(lambda:collections.defaultdict(list))
+    for line in mapPipe.stdout:
+        k = key(line)
+        h = hash(k) % numReduceTasks    # send to reducer buffer h
+        shufbuf[h][k].append(line)
+    logging.info('shuffleMapOutputs for '+str(mapPipe)+' sending buffer to reducerQs')
+    for h in shufbuf:
+        reducerQs[h].put(shufbuf[h])
+    mapPipe.wait()                      # wait for termination of mapper process
+    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done')
+
+def accumulateReduceInputs_v1(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer
     input buffer.  Items in the buffer are grouped by key."""
     while True:
         (k,line) = reducerQ.get()
         reducerBuf[k].append(line)
+        reducerQ.task_done()
+
+def acceptReduceInputs(reducerQ,reducerBuf):
+    """Daemon thread that monitors a queue of items to add to a reducer
+    input buffer.  Items in the buffer are grouped by key."""
+    while True:
+        shufbuf = reducerQ.get()
+        nLines = 0
+        nKeys = 0
+        for key,lines in shufbuf.items():
+            nLines += len(lines)
+            nKeys += 1
+            reducerBuf[key].extend(lines)
+        logging.info('acceptReduceInputs accepted %d lines for %d keys' % (nLines,nKeys))
         reducerQ.task_done()
 
 def sendReduceInputs(reducerBuf,reducePipe,j):
