@@ -7,15 +7,15 @@
 
 
 RAM=/mnt/ramdisk/mrs/
-K=20
+K=60
 BIGFILE=/afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_test.txt
 #BIGFILE=/afs/cs.cmu.edu/user/wcohen/bigML/RCV1/RCV1.full_train.txt
 DIR=$(RAM)
-#NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 10000'
-NBCOUNT='python streamNaiveBayesLearner.py --train'
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+#NBCOUNT='python streamNaiveBayesLearner.py --train'
 SUM='python sum-events.py'
 
-MRS=python ../mrs_gp.py
+MRS=pypy ../mrs_gp.py
 
 simple-disk-times:
 	echo == disk stream - about 3 sec for 100M, 2:03 for 1G
@@ -55,14 +55,20 @@ simple-ram-times-sweep-k:
 	time $(MRS) --input $(RAM)/bigfile1 --output $(RAM)/bigfile1-sharded --mapper cat --reducer cat --numReduceTasks 20
 	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/bigfile1-copy --mapper cat --reducer cat --numReduceTasks 20
 
-# for test data - 100M
-#     --train not 
-#      version 1 	  version 2  	    
-# k	shard	learn	shard	  learn
-# 1	5.7	 3:44	2.8	  3:05
-# 3	6.7	 8:12	3.0	  3:38	  
+# for test data - 100M --train
+#      version 1 	  version 2  	    pypy v2
+# k	shard	learn	shard	  learn	    shard	learn
+# 1	5.7	 3:44	2.8	  3:05	    1:27	3:46
+# 3	6.7	 8:12	3.0	  3:38	    1:28	7:34
 # 10	8.5	14:02	
-# 20	9.0	20:40	3.5	  7:10
+# 20	9.0	20:40	3.5	  7:10	    1:30	26:32
+
+# for test data - 100M --streamTrain 100 pypy
+# k	shard	learn	%learnCPU
+# 1	1:31	  26:49		102
+# 3	1:29	1:01:35		250
+# 10
+# 20
 
 learn-ram-times:
 	echo sharding

@@ -1,14 +1,9 @@
-TODO: 
- -- mrs_gp runs at way less than 100% capacity, why? just too much switching around between processers in reducing? GIL?
- -- jython version doesn't halt - it doesn't kill off the daemon threads ? 
-
+Issue
+ -- multiple mapper processes seem to run slower and slower when reading from the ramdisk
 Possible rewrites:
-
  -- mashing up marime.py and mrs_gp, set up a server that will run
     map-reduce processes, but send output to mrs_fs structures, and
     also let you interrogate those structures.
-
- -- or, have a mrs_fp server, which can take data from other sources.
 
 ROBUSTNESS/ERRORS/DOCS:
  - writeup smallvoc-tfidf.py as an example
