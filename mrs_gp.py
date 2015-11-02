@@ -9,6 +9,7 @@ import time
 import Queue
 import shutil
 
+##############################################################################
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
 # multi-threading map-reduce, to be used with inputs/outputs which are
 # just files in directories.  This combines multi-threading and
@@ -18,8 +19,9 @@ import shutil
 #
 # To do:
 #  map-only tasks, multiple map inputs
-#  secondary grouping sort key --joinmode - see blist.sortedlist
-#  optimize?
+#  secondary grouping sort key --joinmode
+#  optimize - keys
+##############################################################################
 
 def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     """Run a generic streaming map-reduce process.  The mapper and reducer
@@ -190,11 +192,120 @@ def joinAll(xs,msg):
         x.join()
     logging.info('joined all '+msg)
 
-#
+##############################################################################
+# virtual filesystem
+##############################################################################
+
+class TrivialFileSystem(object):
+
+    def __init__(self):
+        #file names in directory/shards
+        self.filesIn = collections.defaultdict(list)
+        #content of (dir,file)
+        self.linesOf = {}
+    def rmDir(self,d):
+        for f in self.filesIn[d]:
+            del self.linesOf[(d,f)]
+        del self.filesIn[d]
+    def append(self,d,f,line):
+        if not f in self.filesIn[d]:
+            self.filesIn[d].append(f)
+            self.linesOf[(d,f)] = list()
+        self.linesOf[(d,f)].append(line)
+    def listDirs(self):
+        return self.filesIn.keys()
+    def listFiles(self,d):
+        return self.filesIn[d]
+    def cat(self,d,f):
+        return self.linesOf[(d,f)]
+    def head(self,d,f,n):
+        return self.linesOf(d,f)[:n]
+    def tail(self,d,f,n):
+        return self.linesOf(d,f)[-n:]
+
+FS = TrivialFileSystem()
+
+##############################################################################
+# server/client stuff
+##############################################################################
+
+# server
+
+from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+
+class MRSHandler(BaseHTTPRequestHandler):
+    
+    def _sendList(self,title,leadin,items):
+        self.send_response(200)
+        self.send_header('Content-type','text-html')
+        self.end_headers()
+        itemList = ''
+        if items:
+            itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, itemList) + ["</ul>"])
+        self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,leadin,itemList))
+
+    def _sendFile(self,text):
+        self.send_response(200)
+        self.send_header('Content-type','text-plain')
+        self.end_headers()
+        self.wfile.write(text)
+
+    def do_GET(self):
+        print "GET request "+self.path
+        try:
+            parts = self.path.split("/")
+            print "parts  = ",parts
+            operation = parts[0]
+            args = parts[1:]
+            if operation=="ls" and not args:
+                self._sendList("Views defined","Views",FS.listDirs())
+            elif operation=="ls" and args:
+                d = args[0]
+                self._sendList("Files in "+d,"Files in "+d,FS.listFiles(d))
+            elif operation=="append":
+                d,f,line = args
+                self._sendList("Appended to "+d+"/"+f,"Appended to "+d+"/"+f,[])
+            elif operation=="cat":
+                d,f = args
+                self._sendFile("\n".join(FS.cat(d,f)))
+            elif operation=="head":
+                d,f,n = args
+                self._sendFile("\n".join(FS.head(d,f,int(n))))
+            elif operation=="tail":
+                d,f,n = args
+                self._sendFile("\n".join(FS.tail(d,f,int(n))))
+            else:
+                self._sendList("Error","unknown command "+self.path,[])
+        except ValueError:
+                self._sendList("Error","illegal command "+self.path,[])
+  
+def runServer():
+    server_address = ('127.0.0.1', 1969)
+    httpd = HTTPServer(server_address, MRSHandler)
+    print('http server is running on port 1969...')
+    httpd.serve_forever()
+
+# client
+
+import httplib
+ 
+def sendRequest(command):
+    http_server = "127.0.0.1:1969"
+    conn = httplib.HTTPConnection(http_server)
+    conn.request("GET", command)
+    response = conn.getresponse()
+    print(response.status, response.reason)
+    data_received = response.read()
+    print(data_received)
+    conn.close()
+
+##############################################################################
 # main
-#
+##############################################################################
 
 def usage():
+    print "usage: --serve [PORT]"
+    print "usage: --send command"
     print "usage: --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]"
     print "       --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]"
 
@@ -202,24 +313,27 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    argspec = ["input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", "help"]
+    argspec = ["serve", "send=", "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", "help"]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
     
-    if "--help" in optdict or (not '--input' in optdict) or (not '--output' in optdict):
+    if "--serve" in optdict:
+        runServer()
+    if "--send" in optdict:
+        sendRequest(optdict['--send'])
+    elif "--help" in optdict or (not '--input' in optdict) or (not '--output' in optdict):
         usage()
-        sys.exit(-1)
-
-    indir = optdict['--input']
-    outdir = optdict['--output']
-    if '--reducer' in optdict:
-        #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
-        mapper = optdict.get('--mapper','cat')
-        reducer = optdict.get('--reducer','cat')
-        numReduceTasks = int(optdict.get('--numReduceTasks','1'))
-        mapreduce(indir,outdir,mapper,reducer,numReduceTasks)
     else:
-        #usage 1: a map-only task has --input, --output, --mapper
-        mapper = optdict.get('--mapper','cat')
-        maponly(indir,outdir,mapper)        
 
+        indir = optdict['--input']
+        outdir = optdict['--output']
+        if '--reducer' in optdict:
+            #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
+            mapper = optdict.get('--mapper','cat')
+            reducer = optdict.get('--reducer','cat')
+            numReduceTasks = int(optdict.get('--numReduceTasks','1'))
+            mapreduce(indir,outdir,mapper,reducer,numReduceTasks)
+        else:
+            #usage 1: a map-only task has --input, --output, --mapper
+            mapper = optdict.get('--mapper','cat')
+            maponly(indir,outdir,mapper)        
