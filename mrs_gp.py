@@ -219,9 +219,11 @@ class TrivialFileSystem(object):
     def cat(self,d,f):
         return self.linesOf[(d,f)]
     def head(self,d,f,n):
-        return self.linesOf(d,f)[:n]
+        return self.linesOf[(d,f)][:n]
     def tail(self,d,f,n):
-        return self.linesOf(d,f)[-n:]
+        return self.linesOf[(d,f)][-n:]
+    def __str__(self):
+        return "FS("+str(self.filesIn)+";"+str(self.linesOf)+")"
 
 FS = TrivialFileSystem()
 
@@ -239,9 +241,10 @@ class MRSHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type','text-html')
         self.end_headers()
+        #print "leadin",leadin,"items",items
         itemList = ''
         if items:
-            itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, itemList) + ["</ul>"])
+            itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, items) + ["</ul>"])
         self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,leadin,itemList))
 
     def _sendFile(self,text):
@@ -254,17 +257,20 @@ class MRSHandler(BaseHTTPRequestHandler):
         print "GET request "+self.path
         try:
             parts = self.path.split("/")
-            print "parts  = ",parts
+            #print "parts  = ",parts
             operation = parts[0]
             args = parts[1:]
             if operation=="ls" and not args:
+                #print "dirs",FS.listDirs(),"fs",FS
                 self._sendList("Views defined","Views",FS.listDirs())
             elif operation=="ls" and args:
                 d = args[0]
+                #print "files",FS.listFiles(d),"fs",FS
                 self._sendList("Files in "+d,"Files in "+d,FS.listFiles(d))
             elif operation=="append":
                 d,f,line = args
-                self._sendList("Appended to "+d+"/"+f,"Appended to "+d+"/"+f,[])
+                FS.append(d,f,line)
+                self._sendList("Appended to "+d+"/"+f,"Appended to "+d+"/"+f,[line])
             elif operation=="cat":
                 d,f = args
                 self._sendFile("\n".join(FS.cat(d,f)))
