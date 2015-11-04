@@ -1,6 +1,6 @@
 #DIR=/mnt/ramdisk/mrs/
 DIR=.
-MRS=pypy ../mrs_gp.py
+MRS=pypy ../mrs_gp.py --task
 K=1
 
 clean:

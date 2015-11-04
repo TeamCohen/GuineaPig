@@ -18,12 +18,64 @@ import traceback
 # just files in directories.  This combines multi-threading and
 # multi-processing.
 #
-# For i/o bound tasks the inputs should be on ramdisk.  
-#
 # To do:
 #  map-only tasks, multiple map inputs
 #  secondary grouping sort key --joinmode
-#  optimize - keys
+#  optimize - keys, IOString?
+#  have a no-server compatibility mode (or, for compute-intensive tasks)
+#  default n=10 for head, tail
+#
+# Gotchas/bugs:
+#   - threading doesn't work right in jython, and doesn't help
+#   much in cpython.  best interpreter is pypy, due to lack
+#   of GIL.
+#  - if you use /afs/ as file store the server seems to 
+#   leave some sort of lock file around which make deletion
+#   impossible while the server is running
+#
+# Usage:
+#  
+#  1) Start a server:
+#
+#  pypy mrs_gp.py --serve   #won't return till you shut it down
+#                           #so you might prefer:
+#                           # pypy mrs_gp.py --serve >& server.log &
+#
+#  2) Run some map-reduce commands.  These are submitted to the
+#  server process and run there.
+#
+#  pypy mrs_gp.py --task --input DIR --output DIR \
+#                        --mapper FOO --reducer BAR --numReduceTasks K
+#
+#  This acts pretty much like a hadoop streaming command: the mapper
+#  and reducer use the same API, but the directories are not HDFS
+#  locations, just some directory on you local FS.
+#
+#  Reducers are optional, if they are not present it will be map-only
+#  task.
+#
+#  DIR also "GPFileSystem" directory, specified by the prefix gpfs:
+#  These are NOT hierarchical and are just stored in memory by the
+#  server.  The files in a directory are always shards of a map-reduce
+#  computation.
+#  
+#  If you want to examine the gpfs: files, you can use a browser on
+#  http://localhost:1969/XXX where XXX is a cgi-style query.  For
+#  instance, http://localhost:1969/ls will list the directories, and
+#  http://localhost:1969/getmerge?dir=foo will return the contents of
+#  all shards in the directory foo.  Other commands are ls?dir=X,
+#  cat?dir=X&file=Y, and head and tail which are like cat but also
+#  have an argument "n".
+#
+#  Or, you can use 'pypy mrs_gp.py --send XXX' instead, which emulates
+#  the browser command and prints the text that would be sent to the
+#  browser.
+#
+# 3) Shut down the server, discarding everything held by the
+# GPFileSystem.
+#
+#  pypy mrs_gp.py --shutdown
+#
 ##############################################################################
 
 ##############################################################################
@@ -70,10 +122,31 @@ class GPFileSystem(object):
     def _fixDir(self,d):
         return d if not d.startswith("gpfs:") else d[len("gpfs:"):]
 
+# global file system used by map-reduce system
+
 FS = GPFileSystem()
 
 ##############################################################################
-# main map-reduce utilities
+# main map-reduce algorithm(s)
+#
+# maponly is very simple: it sets up K independent mapper processes,
+# one for each shard, which read from that shard and write to the
+# corresponding output shard.  If gpfs is used, the reading and
+# writing is from threads which write/read from the appropriate
+# subprocess stdin or stdout.
+#
+# mapreduce is a little more complex.  There are K reducer Queue's,
+# each of regulate access to the data that will be fed to a single
+# reducer.  Since this data is going to be sorted by key, the data is
+# collected in a 'reducerBuffer', which maps keys to values (in
+# memory).  The output of every mapper is collected by a thread
+# running 'shuffleMapOutputs'.  This buffers ALL the map output by
+# shard, and then sends each shard to the approproate reducer queue.
+# Each queue is monitored by a queue-specific thread which adds
+# map-output sharded data to the reducerBuffer for that shard.
+
+There is a "reducerBuffer" for
+# each reduce shard
 ##############################################################################
 
 def performTask(optdict):
@@ -135,6 +208,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
             mapFeeders.append(feederI)
         else:
             mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=subprocess.PIPE)
+        # a thread to read the mapprocess's output
         si = threading.Thread(target=shuffleMapOutputs, args=(mapper,mapPipeI,reducerQs,numReduceTasks))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
@@ -158,6 +232,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         else:
             fpj = open("%s/part%05d" % (outdir,j), 'w')
             reducePipeJ = subprocess.Popen(reducer,shell=True,stdin=subprocess.PIPE,stdout=fpj)
+        # thread to feed data into the reducer process
         uj = threading.Thread(target=sendReduceInputs, args=(reducerBuffers[j],reducePipeJ,j))
         uj.start()                      # uj will shut down reducePipeJ process on completion
         reducers.append(uj)
@@ -181,6 +256,7 @@ def maponly(indir,outdir,mapper):
     mapConsumers = []
     for fi in infiles:
         if ('input' in usingGPFS) and not ('output' in usingGPFS):
+            print 'case gpfs => file'
             mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=open(outdir + "/" + fi, 'w'))
             feederI  = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
             feederI.start()
@@ -209,7 +285,7 @@ def maponly(indir,outdir,mapper):
     if mapConsumers: joinAll(mapConsumers, 'map consumers')
 
 #
-# subroutines
+# subroutines for map-reduce
 #
 
 def setupFiles(indir,outdir):
@@ -230,17 +306,40 @@ def setupFiles(indir,outdir):
     logging.info('inputs: %d files from %s' % (len(infiles),indir))
     return usingGPFS,infiles
 
+def key(line):
+    """Extract the key for a line containing a tab-separated key,value pair."""
+    return line[:line.find("\t")]
+
+def joinAll(xs,msg):
+    """Utility to join with all threads/queues in a list."""
+    logging.info('joining ' + str(len(xs))+' '+msg)
+    for i,x in enumerate(xs):
+        x.join()
+    logging.info('joined all '+msg)
+
 #
-# routines attached to threads
+# routines that are attached to threads
 #
 
 def feedPipeFromGPFS(dirName,fileName,pipe):
+    """Feed the lines from a gpfs shard into a subprocess,
+    by writing them one by one to the stdin for that subprocess."""
+    logging.info('started feeder from %s/%s to %s' % (dirName,fileName,str(pipe)))
     for line in FS.cat(dirName, fileName):
         pipe.stdin.write(line+"\n")
+    pipe.stdin.close()  #so pipe process will get an EOF signal
+    pipe.wait()
+    logging.info('exiting feeder from %s/%s to %s' % (dirName,fileName,str(pipe)))
 
 def writePipeToGPFS(dirName,fileName,pipe):
+    """Read outputs lines from a subprocess, and
+    feed them one by one into a gpfs shard."""
+    logging.info('started reader to %s/%s to %s' % (dirName,fileName,str(pipe)))
     for line in pipe.stdout:
         FS.append(dirName,fileName,line.strip())
+    logging.info('waiting for writing pipe to finish'+str(pipe))
+    pipe.wait()
+    logging.info('exiting reader to %s/%s to %s' % (dirName,fileName,str(pipe)))
 
 def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
     """Thread that takes outputs of a map pipeline, hashes them, and
@@ -256,14 +355,6 @@ def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
         reducerQs[h].put(shufbuf[h])
     mapPipe.wait()                      # wait for termination of mapper process
     logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done')
-
-def accumulateReduceInputs_v1(reducerQ,reducerBuf):
-    """Daemon thread that monitors a queue of items to add to a reducer
-    input buffer.  Items in the buffer are grouped by key."""
-    while True:
-        (k,line) = reducerQ.get()
-        reducerBuf[k].append(line)
-        reducerQ.task_done()
 
 def acceptReduceInputs(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer
@@ -287,24 +378,6 @@ def sendReduceInputs(reducerBuf,reducePipe,j):
     reducePipe.stdin.close()
     reducePipe.wait()                   # wait for termination of reducer
 
-#
-# utils
-#
-
-# TODO make this faster
-
-def key(line):
-    """Extract the key for a line containing a tab-separated key,value pair."""
-    return line[:line.find("\t")]
-
-def joinAll(xs,msg):
-    """Utility to join with all threads/queues in a list."""
-    logging.info('joining ' + str(len(xs))+' '+msg)
-    for i,x in enumerate(xs):
-        x.join()
-    logging.info('joined all '+msg)
-
-
 ##############################################################################
 # server/client stuff
 ##############################################################################
@@ -313,6 +386,8 @@ def joinAll(xs,msg):
 
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 import urlparse
+
+keepRunning = True
 
 class MRSHandler(BaseHTTPRequestHandler):
     
@@ -342,11 +417,21 @@ class MRSHandler(BaseHTTPRequestHandler):
             # don't use multiple values for any key
             requestArgs = dict(map(lambda (key,valueList):(key,valueList[0]), requestArgs.items()))
             print "request:",requestOp,requestArgs
-            if requestOp=="ls" and not 'dir' in requestArgs:
+            if requestOp=="shutdown":
+                global keepRunning
+                keepRunning = False
+                self._sendFile("shutting down")
+            elif requestOp=="ls" and not 'dir' in requestArgs:
                 self._sendList("View listing",FS.listDirs())
             elif requestOp=="ls" and 'dir' in requestArgs:
                 d = requestArgs['dir']
                 self._sendList("Files in "+d,FS.listFiles(d))
+            elif requestOp=="getmerge" and 'dir' in requestArgs:
+                d = requestArgs['dir']
+                buf = []
+                for f in FS.listFiles(d):
+                    buf += FS.cat(d,f)
+                self._sendFile("\n".join(buf))
             elif requestOp=="append":
                 d = requestArgs['dir']
                 f = requestArgs['file']
@@ -386,7 +471,8 @@ def runServer():
     server_address = ('127.0.0.1', 1969)
     httpd = HTTPServer(server_address, MRSHandler)
     print('http server is running on port 1969...')
-    httpd.serve_forever()
+    while keepRunning:
+        httpd.handle_request()
 
 # client
 
@@ -407,24 +493,31 @@ def sendRequest(command):
 ##############################################################################
 
 def usage():
-    print "usage: --serve [PORT]"
-    print "usage: --send command"
-    print "usage: --task --input ..."
-    print "usage: --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]"
-    print "       --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]"
+    print "usage: --serve: start server"
+    print "usage: --shutdown: shutdown"
+    print "usage: --send XXXX: simulate browser request http://server:port/XXXX and print response page"
+    print "  where requests are ls, ls?dir=XXX, append?dir=XXX&file=YYY&line=ZZZ, cat?dir=XXX&file=YYY,"
+    print "                     getmerge?dir=XXX, head?dir=XXX&file=YYY&n=NNN, tail?dir=XXX&file=YYY&n=NNN,"
+    print "                     shutdown"
+    print "usage: --task  --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]: map-only task"
+    print "       --task --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]: map-reduce task"
+    print "  where directories DIRi are local file directories OR gpfs:XXX"
 
 if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    argspec = ["task", "serve", "send=", "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", "help"]
+    argspec = ["serve", "send=", "shutdown", "task", "help", 
+               "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
     
     if "--serve" in optdict:
         runServer()
-    if "--send" in optdict:
+    elif "--send" in optdict:
         sendRequest(optdict['--send'])
+    elif "--shutdown" in optdict:
+        sendRequest("shutdown")
     elif "--task" in optdict:
         del optdict['--task']
         sendRequest("task?" + urllib.urlencode(optdict))
