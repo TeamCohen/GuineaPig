@@ -8,6 +8,9 @@ import subprocess
 import time
 import Queue
 import shutil
+import urllib
+import time
+import traceback
 
 ##############################################################################
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
@@ -22,6 +25,21 @@ import shutil
 #  secondary grouping sort key --joinmode
 #  optimize - keys
 ##############################################################################
+
+def performTask(optdict):
+    """Utility that calls mapreduce or maponly, as appropriate, based on the options."""
+    indir = optdict['--input']
+    outdir = optdict['--output']
+    if '--reducer' in optdict:
+        #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
+        mapper = optdict.get('--mapper','cat')
+        reducer = optdict.get('--reducer','cat')
+        numReduceTasks = int(optdict.get('--numReduceTasks','1'))
+        mapreduce(indir,outdir,mapper,reducer,numReduceTasks)
+    else:
+        #usage 1: a map-only task has --input, --output, --mapper
+        mapper = optdict.get('--mapper','cat')
+        maponly(indir,outdir,mapper)        
 
 def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     """Run a generic streaming map-reduce process.  The mapper and reducer
@@ -118,17 +136,6 @@ def setupFiles(indir,outdir):
 # routines attached to threads
 #
 
-def shuffleMapOutputs_v1(mapper,mapPipe,reducerQs,numReduceTasks):
-    """Thread that takes outputs of a map pipeline, hashes them, and
-    sticks them on the appropriate reduce queue."""
-    for line in mapPipe.stdout:
-        k = key(line)
-        h = hash(k) % numReduceTasks    # send to reducer buffer h
-        reducerQs[h].put((k,line))
-    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' finishes reading, now waiting')
-    mapPipe.wait()                      # wait for termination of mapper process
-    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done waiting')
-
 def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
     """Thread that takes outputs of a map pipeline, hashes them, and
     sticks them on the appropriate reduce queue."""
@@ -181,9 +188,8 @@ def sendReduceInputs(reducerBuf,reducePipe,j):
 # TODO make this faster
 
 def key(line):
-    """Extract the key for a line containing a key,value pair."""
-    parts = line.strip().split("\t")
-    return parts[0]
+    """Extract the key for a line containing a tab-separated key,value pair."""
+    return line[:line.find("\t")]
 
 def joinAll(xs,msg):
     """Utility to join with all threads/queues in a list."""
@@ -234,10 +240,11 @@ FS = TrivialFileSystem()
 # server
 
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+import urlparse
 
 class MRSHandler(BaseHTTPRequestHandler):
     
-    def _sendList(self,title,leadin,items):
+    def _sendList(self,title,items):
         self.send_response(200)
         self.send_header('Content-type','text-html')
         self.end_headers()
@@ -245,7 +252,7 @@ class MRSHandler(BaseHTTPRequestHandler):
         itemList = ''
         if items:
             itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, items) + ["</ul>"])
-        self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,leadin,itemList))
+        self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,title,itemList))
 
     def _sendFile(self,text):
         self.send_response(200)
@@ -256,34 +263,52 @@ class MRSHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         print "GET request "+self.path
         try:
-            parts = self.path.split("/")
-            #print "parts  = ",parts
-            operation = parts[0]
-            args = parts[1:]
-            if operation=="ls" and not args:
-                #print "dirs",FS.listDirs(),"fs",FS
-                self._sendList("Views defined","Views",FS.listDirs())
-            elif operation=="ls" and args:
-                d = args[0]
-                #print "files",FS.listFiles(d),"fs",FS
-                self._sendList("Files in "+d,"Files in "+d,FS.listFiles(d))
-            elif operation=="append":
-                d,f,line = args
+            p = urlparse.urlparse(self.path)
+            requestOp = p.path
+            requestArgs = urlparse.parse_qs(p.query)
+            #convert the dict of lists to a dict of items, since I
+            # don't use multiple values for any key
+            requestArgs = dict(map(lambda (key,valueList):(key,valueList[0]), requestArgs.items()))
+            print "request:",requestOp,requestArgs
+            if requestOp=="ls" and not 'dir' in requestArgs:
+                self._sendList("View listing",FS.listDirs())
+            elif requestOp=="ls" and 'dir' in requestArgs:
+                d = requestArgs['dir']
+                self._sendList("Files in "+d,FS.listFiles(d))
+            elif requestOp=="append":
+                d = requestArgs['dir']
+                f = requestArgs['file']
+                line = requestArgs['line']
                 FS.append(d,f,line)
-                self._sendList("Appended to "+d+"/"+f,"Appended to "+d+"/"+f,[line])
-            elif operation=="cat":
-                d,f = args
+                self._sendList("Appended to "+d+"/"+f,[line])
+            elif requestOp=="cat":
+                d = requestArgs['dir']
+                f = requestArgs['file']
                 self._sendFile("\n".join(FS.cat(d,f)))
-            elif operation=="head":
-                d,f,n = args
+            elif requestOp=="head":
+                d = requestArgs['dir']
+                f = requestArgs['file']
+                n = requestArgs['n']
                 self._sendFile("\n".join(FS.head(d,f,int(n))))
-            elif operation=="tail":
-                d,f,n = args
+            elif requestOp=="tail":
+                d = requestArgs['dir']
+                f = requestArgs['file']
+                n = requestArgs['n']
                 self._sendFile("\n".join(FS.tail(d,f,int(n))))
+            elif requestOp=="task":
+                try:
+                    start = time.time()
+                    performTask(requestArgs)
+                    end = time.time()
+                    stat =  "Task performed in %.2f sec" % (end-start)
+                    print stat
+                    self._sendList(stat, map(str, requestArgs.items()))
+                except Exception:
+                    self._sendFile(traceback.format_exc())
             else:
-                self._sendList("Error","unknown command "+self.path,[])
-        except ValueError:
-                self._sendList("Error","illegal command "+self.path,[])
+                self._sendList("Error: unknown command "+requestOp,[self.path])
+        except KeyError:
+                self._sendList("Error: illegal command",[self.path])
   
 def runServer():
     server_address = ('127.0.0.1', 1969)
@@ -312,6 +337,7 @@ def sendRequest(command):
 def usage():
     print "usage: --serve [PORT]"
     print "usage: --send command"
+    print "usage: --task --input ..."
     print "usage: --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]"
     print "       --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]"
 
@@ -319,7 +345,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    argspec = ["serve", "send=", "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", "help"]
+    argspec = ["task", "serve", "send=", "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", "help"]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
     
@@ -327,19 +353,10 @@ if __name__ == "__main__":
         runServer()
     if "--send" in optdict:
         sendRequest(optdict['--send'])
+    elif "--task" in optdict:
+        del optdict['--task']
+        sendRequest("task?" + urllib.urlencode(optdict))
     elif "--help" in optdict or (not '--input' in optdict) or (not '--output' in optdict):
         usage()
     else:
-
-        indir = optdict['--input']
-        outdir = optdict['--output']
-        if '--reducer' in optdict:
-            #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
-            mapper = optdict.get('--mapper','cat')
-            reducer = optdict.get('--reducer','cat')
-            numReduceTasks = int(optdict.get('--numReduceTasks','1'))
-            mapreduce(indir,outdir,mapper,reducer,numReduceTasks)
-        else:
-            #usage 1: a map-only task has --input, --output, --mapper
-            mapper = optdict.get('--mapper','cat')
-            maponly(indir,outdir,mapper)        
+        performTask(optdict)
