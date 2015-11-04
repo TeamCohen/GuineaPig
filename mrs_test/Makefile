@@ -1,7 +1,7 @@
 #DIR=/mnt/ramdisk/mrs/
 DIR=.
-MRS=pypy ../mrs_gp.py --task
-K=1
+MRS=pypy ../mrs_gp.py
+K=2
 
 clean:
 	rm -rf sharded unsharded-copy sharded-copy 
@@ -30,7 +30,7 @@ sharded: unsharded/train.txt
 
 events: sharded
 	echo checking job of training naive bayes in parallel
-	$(MRS) 	--input $(DIR)/sharded --output $(DIR)/events --numReduceTasks $(K) \
+	time $(MRS) --input $(DIR)/sharded --output $(DIR)/events --numReduceTasks $(K) \
 		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
 		--reducer 'python sum-events.py'
 
@@ -42,7 +42,7 @@ tmp: sharded
 
 events.txt: unsharded/train.txt
 	echo == training naive bayes directly
-	cat unsharded/train.txt | python streamNaiveBayesLearner.py --train \
+	cat unsharded/train.txt | python streamNaiveBayesLearner.py --streamTrain 100 \
 	| LC_COLLATE=C sort | python sum-events.py > events.txt
 
 compare-events: events.txt events

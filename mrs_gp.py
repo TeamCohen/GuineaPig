@@ -144,9 +144,7 @@ FS = GPFileSystem()
 # shard, and then sends each shard to the approproate reducer queue.
 # Each queue is monitored by a queue-specific thread which adds
 # map-output sharded data to the reducerBuffer for that shard.
-
-There is a "reducerBuffer" for
-# each reduce shard
+#
 ##############################################################################
 
 def performTask(optdict):

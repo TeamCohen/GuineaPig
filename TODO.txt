@@ -1,9 +1,6 @@
 Issue
- -- multiple mapper processes seem to run slower and slower when reading from the ramdisk
-Possible rewrites:
- -- mashing up marime.py and mrs_gp, set up a server that will run
-    map-reduce processes, but send output to mrs_fs structures, and
-    also let you interrogate those structures.
+ -- mrs_gp.py: multiple mapper processes seem to run very slow.....why?  resharding is ok,
+ why is learning so darn so?
 
 ROBUSTNESS/ERRORS/DOCS:
  - writeup smallvoc-tfidf.py as an example

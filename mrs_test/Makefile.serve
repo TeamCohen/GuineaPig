@@ -1,4 +1,5 @@
 MRS=pypy ../mrs_gp.py
+K=20
 
 clean: 
 	rm -rf /tmp/test-copy
@@ -82,4 +83,16 @@ roundtrip-reshard:
 	echo should be the same
 	sort test/* | sum
 	sort /tmp/test-copy/* | sum
+
+parallel-events.txt: 
+	bash start-server.sh
+	echo sharding to $(K) shards
+	time  $(MRS) --task --input unsharded --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	echo training naive bayes in parallel
+	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) \
+		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
+		--reducer 'python sum-events.py'
+	echo export
+	$(MRS) --send 'getmerge?dir=events' | tail -n +2 > parallel-events.txt
+	$(MRS) --shutdown
 
