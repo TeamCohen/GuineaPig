@@ -26,6 +26,56 @@ import traceback
 #  optimize - keys
 ##############################################################################
 
+##############################################################################
+#
+# shared "files system"
+#
+##############################################################################
+
+class GPFileSystem(object):
+
+    def __init__(self):
+        #file names in directory/shards
+        self.filesIn = collections.defaultdict(list)
+        #content of (dir,file)
+        self.linesOf = {}
+    def rmDir(self,d0):
+        d = self._fixDir(d0)
+        if d in self.filesIn:
+            for f in self.filesIn[d]:
+                del self.linesOf[(d,f)]
+            del self.filesIn[d]
+    def append(self,d0,f,line):
+        d = self._fixDir(d0)
+        if not f in self.filesIn[d]:
+            self.filesIn[d].append(f)
+            self.linesOf[(d,f)] = list()
+        self.linesOf[(d,f)].append(line)
+    def listDirs(self):
+        return self.filesIn.keys()
+    def listFiles(self,d0):
+        d = self._fixDir(d0)
+        return self.filesIn[d]
+    def cat(self,d0,f):
+        d = self._fixDir(d0)
+        return self.linesOf[(d,f)]
+    def head(self,d0,f,n):
+        d = self._fixDir(d0)
+        return self.linesOf[(d,f)][:n]
+    def tail(self,d0,f,n):
+        d = self._fixDir(d0)
+        return self.linesOf[(d,f)][-n:]
+    def __str__(self):
+        return "FS("+str(self.filesIn)+";"+str(self.linesOf)+")"
+    def _fixDir(self,d):
+        return d if not d.startswith("gpfs:") else d[len("gpfs:"):]
+
+FS = GPFileSystem()
+
+##############################################################################
+# main map-reduce utilities
+##############################################################################
+
 def performTask(optdict):
     """Utility that calls mapreduce or maponly, as appropriate, based on the options."""
     indir = optdict['--input']
@@ -46,7 +96,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     are shell commands, as in Hadoop streaming.  Both indir and outdir
     are directories."""
 
-    infiles = setupFiles(indir,outdir)
+    usingGPFS,infiles = setupFiles(indir,outdir)
 
     # Set up a place to save the inputs to K reducers - each of which
     # is a buffer bj, which maps a key to a list of values associated
@@ -67,32 +117,47 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         tj.start()
 
     # start the mappers - each of which is a process that reads from
-    # an input file, and a thread that passes its outputs to the
-    # reducer queues.
+    # an input file or GPFS location, and a thread that passes its
+    # outputs to the reducer queues.
 
     logging.info('starting mapper processes and shuffler threads')
     mappers = []
+    mapFeeders = []
     for fi in infiles:
         # WARNING: it doesn't seem to work well to start the processes
         # inside a thread - this led to bugs with the reducer
         # processes.  This is possibly a python library bug:
         # http://bugs.python.org/issue1404925
-        mapPipe = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=subprocess.PIPE)
-        si = threading.Thread(target=shuffleMapOutputs, args=(mapper,mapPipe,reducerQs,numReduceTasks))
+        if 'input' in usingGPFS:
+            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+            feederI = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
+            feederI.start()
+            mapFeeders.append(feederI)
+        else:
+            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=subprocess.PIPE)
+        si = threading.Thread(target=shuffleMapOutputs, args=(mapper,mapPipeI,reducerQs,numReduceTasks))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
 
     #wait for the map tasks, and to empty the queues
-    joinAll(mappers,'mappers')          # no more tasks will be added to the queues
+    joinAll(mappers,'mappers')        
+    if mapFeeders: joinAll(mapFeeders,'map feeders') 
 
     # run the reduce processes, each of which is associated with a
     # thread that feeds it inputs from the j's reduce buffer.
 
     logging.info('starting reduce processes and threads to feed these processes')
     reducers = []
+    reducerConsumers = []
     for j in range(numReduceTasks):    
-        fpj = open("%s/part%05d" % (outdir,j), 'w')
-        reducePipeJ = subprocess.Popen(reducer,shell=True,stdin=subprocess.PIPE,stdout=fpj)
+        if 'output' in usingGPFS:
+            reducePipeJ = subprocess.Popen(reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+            consumerJ = threading.Thread(target=writePipeToGPFS, args=(outdir,("part%05d" % j),reducePipeJ))
+            consumerJ.start()
+            reducerConsumers.append(consumerJ)
+        else:
+            fpj = open("%s/part%05d" % (outdir,j), 'w')
+            reducePipeJ = subprocess.Popen(reducer,shell=True,stdin=subprocess.PIPE,stdout=fpj)
         uj = threading.Thread(target=sendReduceInputs, args=(reducerBuffers[j],reducePipeJ,j))
         uj.start()                      # uj will shut down reducePipeJ process on completion
         reducers.append(uj)
@@ -100,41 +165,82 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     #wait for the reduce tasks
     joinAll(reducerQs,'reduce queues')  # the queues have been emptied
     joinAll(reducers,'reducers')
+    if reducerConsumers: joinAll(reducerConsumers,'reducer consumers')
 
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
 
-    infiles = setupFiles(indir,outdir)
+    usingGPFS,infiles = setupFiles(indir,outdir)
 
     # start the mappers - each of which is a process that reads from
     # an input file, and outputs to the corresponding output file
 
     logging.info('starting mapper processes')
     activeMappers = set()
+    mapFeeders = []
+    mapConsumers = []
     for fi in infiles:
-        mapPipe = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=open(outdir + "/" + fi, 'w'))
-        activeMappers.add(mapPipe)
+        if ('input' in usingGPFS) and not ('output' in usingGPFS):
+            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=open(outdir + "/" + fi, 'w'))
+            feederI  = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
+            feederI.start()
+            mapFeeders.append(feederI)
+        elif not ('input' in usingGPFS) and ('output' in usingGPFS):
+            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=subprocess.PIPE)
+            consumerI  = threading.Thread(target=writePipeToGPFS, args=(outdir,fi,mapPipeI))
+            consumerI.start()
+            mapConsumers.append(consumerI)
+        elif ('input' in usingGPFS) and ('output' in usingGPFS):
+            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+            feederI  = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
+            feederI.start()
+            mapFeeders.append(feederI)
+            consumerI  = threading.Thread(target=writePipeToGPFS, args=(outdir,fi,mapPipeI))
+            consumerI.start()
+            mapConsumers.append(consumerI)
+        else:
+            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=open(outdir + "/" + fi, 'w'))
+        activeMappers.add(mapPipeI)
 
     #wait for the map tasks to finish
     for mapPipe in activeMappers:
         mapPipe.wait()
+    if mapFeeders: joinAll(mapFeeders, 'map feeders')
+    if mapConsumers: joinAll(mapConsumers, 'map consumers')
 
 #
 # subroutines
 #
 
 def setupFiles(indir,outdir):
-    infiles = [f for f in os.listdir(indir)]
-    if os.path.exists(outdir):
-        logging.warn('removing %s' % (outdir))
-        shutil.rmtree(outdir)
-    os.makedirs(outdir)
+    usingGPFS = set()
+    if indir.startswith("gpfs:"):
+        usingGPFS.add('input')
+        infiles = FS.listFiles(indir)
+    else:
+        infiles = [f for f in os.listdir(indir)]
+    if outdir.startswith("gpfs:"):
+        usingGPFS.add('output')
+        FS.rmDir(outdir)
+    else:
+        if os.path.exists(outdir):
+            logging.warn('removing %s' % (outdir))
+            shutil.rmtree(outdir)
+        os.makedirs(outdir)
     logging.info('inputs: %d files from %s' % (len(infiles),indir))
-    return infiles
+    return usingGPFS,infiles
 
 #
 # routines attached to threads
 #
+
+def feedPipeFromGPFS(dirName,fileName,pipe):
+    for line in FS.cat(dirName, fileName):
+        pipe.stdin.write(line+"\n")
+
+def writePipeToGPFS(dirName,fileName,pipe):
+    for line in pipe.stdout:
+        FS.append(dirName,fileName,line.strip())
 
 def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
     """Thread that takes outputs of a map pipeline, hashes them, and
@@ -198,40 +304,6 @@ def joinAll(xs,msg):
         x.join()
     logging.info('joined all '+msg)
 
-##############################################################################
-# virtual filesystem
-##############################################################################
-
-class TrivialFileSystem(object):
-
-    def __init__(self):
-        #file names in directory/shards
-        self.filesIn = collections.defaultdict(list)
-        #content of (dir,file)
-        self.linesOf = {}
-    def rmDir(self,d):
-        for f in self.filesIn[d]:
-            del self.linesOf[(d,f)]
-        del self.filesIn[d]
-    def append(self,d,f,line):
-        if not f in self.filesIn[d]:
-            self.filesIn[d].append(f)
-            self.linesOf[(d,f)] = list()
-        self.linesOf[(d,f)].append(line)
-    def listDirs(self):
-        return self.filesIn.keys()
-    def listFiles(self,d):
-        return self.filesIn[d]
-    def cat(self,d,f):
-        return self.linesOf[(d,f)]
-    def head(self,d,f,n):
-        return self.linesOf[(d,f)][:n]
-    def tail(self,d,f,n):
-        return self.linesOf[(d,f)][-n:]
-    def __str__(self):
-        return "FS("+str(self.filesIn)+";"+str(self.linesOf)+")"
-
-FS = TrivialFileSystem()
 
 ##############################################################################
 # server/client stuff
