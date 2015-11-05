@@ -1,3 +1,9 @@
+Branching:
+ master
+ | mrs
+ | | mrs_serve
+ | | | mrs_serve_opt
+
 Issue
  -- mrs_gp.py: multiple mapper processes seem to run very slow.....why?  resharding is ok,
  why is learning so darn so?

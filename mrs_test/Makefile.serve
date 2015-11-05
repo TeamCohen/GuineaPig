@@ -50,7 +50,7 @@ reshard:
 load:
 	bash start-server.sh
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat
-	$(MRS) --send 'cat?dir=test-copy&file=small.txt' | tail -n +2 > tmp.txt
+	$(MRS) --send 'getmerge?dir=test-copy' | tail -n +2 > tmp.txt
 	$(MRS) --shutdown
 	echo should be the same
 	sum test/* tmp.txt
@@ -92,6 +92,7 @@ parallel-events.txt:
 	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) \
 		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
 		--reducer 'python sum-events.py'
+	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' 
 	echo export
 	$(MRS) --send 'getmerge?dir=events' | tail -n +2 > parallel-events.txt
 	$(MRS) --shutdown

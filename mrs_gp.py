@@ -11,6 +11,7 @@ import shutil
 import urllib
 import time
 import traceback
+import cStringIO
 
 ##############################################################################
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
@@ -97,12 +98,12 @@ class GPFileSystem(object):
             for f in self.filesIn[d]:
                 del self.linesOf[(d,f)]
             del self.filesIn[d]
-    def append(self,d0,f,line):
+    def write(self,d0,f,line):
         d = self._fixDir(d0)
         if not f in self.filesIn[d]:
             self.filesIn[d].append(f)
-            self.linesOf[(d,f)] = list()
-        self.linesOf[(d,f)].append(line)
+            self.linesOf[(d,f)] = cStringIO.StringIO()
+        self.linesOf[(d,f)].write(line)
     def listDirs(self):
         return self.filesIn.keys()
     def listFiles(self,d0):
@@ -110,13 +111,13 @@ class GPFileSystem(object):
         return self.filesIn[d]
     def cat(self,d0,f):
         d = self._fixDir(d0)
-        return self.linesOf[(d,f)]
+        return self.linesOf[(d,f)].getvalue()
     def head(self,d0,f,n):
         d = self._fixDir(d0)
-        return self.linesOf[(d,f)][:n]
+        return self.linesOf[(d,f)].getvalue()[:n]
     def tail(self,d0,f,n):
         d = self._fixDir(d0)
-        return self.linesOf[(d,f)][-n:]
+        return self.linesOf[(d,f)].getvalue()[-n:]
     def __str__(self):
         return "FS("+str(self.filesIn)+";"+str(self.linesOf)+")"
     def _fixDir(self,d):
@@ -170,75 +171,54 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     usingGPFS,infiles = setupFiles(indir,outdir)
 
     # Set up a place to save the inputs to K reducers - each of which
-    # is a buffer bj, which maps a key to a list of values associated
-    # with that key.  To fill these buffers we also have K threads tj
-    # to accumulate inputs, and K Queue's qj for the threads to read
-    # from.
+    # is a buffer bj, which contains lines for shard K,
 
     logging.info('starting reduce buffer queues')
     reducerQs = []        # task queues to join with later 
-    reducerBuffers = []   # data to send to reduce processes later 
+    reducerBuffers = []
     for j in range(numReduceTasks):
         qj = Queue.Queue()
-        bj = collections.defaultdict(list)
         reducerQs.append(qj)
+        bj = cStringIO.StringIO()
         reducerBuffers.append(bj)
         tj = threading.Thread(target=acceptReduceInputs, args=(qj,bj))
         tj.daemon = True
         tj.start()
 
-    # start the mappers - each of which is a process that reads from
-    # an input file or GPFS location, and a thread that passes its
-    # outputs to the reducer queues.
+    # start the mappers - along with threads to shuffle their outputs
+    # to the appropriate reducer task queue
 
     logging.info('starting mapper processes and shuffler threads')
     mappers = []
-    mapFeeders = []
     for fi in infiles:
         # WARNING: it doesn't seem to work well to start the processes
         # inside a thread - this led to bugs with the reducer
         # processes.  This is possibly a python library bug:
         # http://bugs.python.org/issue1404925
-        if 'input' in usingGPFS:
-            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
-            feederI = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
-            feederI.start()
-            mapFeeders.append(feederI)
-        else:
-            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=subprocess.PIPE)
-        # a thread to read the mapprocess's output
-        si = threading.Thread(target=shuffleMapOutputs, args=(mapper,mapPipeI,reducerQs,numReduceTasks))
+        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        si = threading.Thread(target=shuffleMapOutputs, args=(usingGPFS,numReduceTasks,mapPipeI,indir,fi,reducerQs))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
 
     #wait for the map tasks, and to empty the queues
     joinAll(mappers,'mappers')        
-    if mapFeeders: joinAll(mapFeeders,'map feeders') 
+    joinAll(reducerQs,'reduce queues')
 
     # run the reduce processes, each of which is associated with a
     # thread that feeds it inputs from the j's reduce buffer.
 
     logging.info('starting reduce processes and threads to feed these processes')
     reducers = []
-    reducerConsumers = []
     for j in range(numReduceTasks):    
-        if 'output' in usingGPFS:
-            reducePipeJ = subprocess.Popen(reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
-            consumerJ = threading.Thread(target=writePipeToGPFS, args=(outdir,("part%05d" % j),reducePipeJ))
-            consumerJ.start()
-            reducerConsumers.append(consumerJ)
-        else:
-            fpj = open("%s/part%05d" % (outdir,j), 'w')
-            reducePipeJ = subprocess.Popen(reducer,shell=True,stdin=subprocess.PIPE,stdout=fpj)
+        reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
         # thread to feed data into the reducer process
-        uj = threading.Thread(target=sendReduceInputs, args=(reducerBuffers[j],reducePipeJ,j))
+        uj = threading.Thread(target=runReducer, 
+                              args=(usingGPFS,reducePipeJ,reducerBuffers[j],("part%05d" % j),outdir))
         uj.start()                      # uj will shut down reducePipeJ process on completion
         reducers.append(uj)
 
     #wait for the reduce tasks
-    joinAll(reducerQs,'reduce queues')  # the queues have been emptied
     joinAll(reducers,'reducers')
-    if reducerConsumers: joinAll(reducerConsumers,'reducer consumers')
 
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
@@ -248,39 +228,55 @@ def maponly(indir,outdir,mapper):
     # start the mappers - each of which is a process that reads from
     # an input file, and outputs to the corresponding output file
 
-    logging.info('starting mapper processes')
-    activeMappers = set()
-    mapFeeders = []
-    mapConsumers = []
+    logging.info('starting mappers')
+    mapThreads = []
     for fi in infiles:
-        if ('input' in usingGPFS) and not ('output' in usingGPFS):
-            print 'case gpfs => file'
-            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=open(outdir + "/" + fi, 'w'))
-            feederI  = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
-            feederI.start()
-            mapFeeders.append(feederI)
-        elif not ('input' in usingGPFS) and ('output' in usingGPFS):
-            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=subprocess.PIPE)
-            consumerI  = threading.Thread(target=writePipeToGPFS, args=(outdir,fi,mapPipeI))
-            consumerI.start()
-            mapConsumers.append(consumerI)
-        elif ('input' in usingGPFS) and ('output' in usingGPFS):
-            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
-            feederI  = threading.Thread(target=feedPipeFromGPFS, args=(indir,fi,mapPipeI))
-            feederI.start()
-            mapFeeders.append(feederI)
-            consumerI  = threading.Thread(target=writePipeToGPFS, args=(outdir,fi,mapPipeI))
-            consumerI.start()
-            mapConsumers.append(consumerI)
-        else:
-            mapPipeI = subprocess.Popen(mapper,shell=True,stdin=open(indir + "/" + fi),stdout=open(outdir + "/" + fi, 'w'))
-        activeMappers.add(mapPipeI)
+        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
+        mapThreadI.start()
+        mapThreads.append(mapThreadI)
+    joinAll(mapThreads,'mappers')
 
-    #wait for the map tasks to finish
-    for mapPipe in activeMappers:
-        mapPipe.wait()
-    if mapFeeders: joinAll(mapFeeders, 'map feeders')
-    if mapConsumers: joinAll(mapConsumers, 'map consumers')
+#
+# routines attached to threads
+#
+
+def runMapper(usingGPFS,mapPipe,indir,f,outdir):
+    logging.info('runMapper for file '+indir+"/"+f+" > "+outdir+"/"+f)
+    inputString=getInput(usingGPFS,indir,f)
+    #logging.info('before map inputString is >>'+inputString+"<<")
+    (output,logs) = mapPipe.communicate(inputString)
+    putOutput(usingGPFS,outdir,f,output)
+    #logging.info('after output output is >>'+FS.cat(outdir,f)+"<<")
+    #logging.info("output=inputString is "+(output==inputString))
+    mapPipe.wait()
+
+def runReducer(usingGPFS,redPipe,buf,f,outdir):
+    (output,logs) = redPipe.communicate(input=buf.getvalue())
+    putOutput(usingGPFS,outdir,f,output)
+    redPipe.wait()
+
+def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
+    """Thread that takes outputs of a map pipeline, hashes them, and
+    sends them in the appropriate reduce queue."""
+    #maps shard index to a key->list defaultdict
+    logging.info('shuffleMapOutputs for mapper from %s/%s started' % (indir,f))
+    (output,logs) = mapPipe.communicate(input=getInput(usingGPFS,indir,f))
+    logging.info('shuffleMapOutputs for mapper from %s/%s communicated' % (indir,f))
+    for line in cStringIO.StringIO(output):
+        k = key(line)
+        h = hash(k) % numReduceTasks    # send to reducer buffer h
+        reducerQs[h].put(line)
+    mapPipe.wait()                      # wait for termination of mapper process
+    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done')
+
+def acceptReduceInputs(reducerQ,reducerBuf):
+    """Daemon thread that monitors a queue of items to add to a reducer
+    input buffer."""
+    while True:
+        line = reducerQ.get()
+        reducerBuf.write(line)
+        reducerQ.task_done()
 
 #
 # subroutines for map-reduce
@@ -304,6 +300,23 @@ def setupFiles(indir,outdir):
     logging.info('inputs: %d files from %s' % (len(infiles),indir))
     return usingGPFS,infiles
 
+def getInput(usingGPFS,indir,f):
+    if 'input' in usingGPFS:
+        inputString = FS.cat(indir,f)
+    else:
+        inputString = ""
+        for line in open(indir+"/"+f):
+            inputString += line
+    return inputString
+
+def putOutput(usingGPFS,outdir,f,outputString):
+    if 'output' in usingGPFS:
+        FS.write(outdir,f,outputString)
+    else:
+        fp = open(outdir+"/"+f, 'w')
+        fp.write(outputString)
+        fp.close()
+
 def key(line):
     """Extract the key for a line containing a tab-separated key,value pair."""
     return line[:line.find("\t")]
@@ -315,66 +328,6 @@ def joinAll(xs,msg):
         x.join()
     logging.info('joined all '+msg)
 
-#
-# routines that are attached to threads
-#
-
-def feedPipeFromGPFS(dirName,fileName,pipe):
-    """Feed the lines from a gpfs shard into a subprocess,
-    by writing them one by one to the stdin for that subprocess."""
-    logging.info('started feeder from %s/%s to %s' % (dirName,fileName,str(pipe)))
-    for line in FS.cat(dirName, fileName):
-        pipe.stdin.write(line+"\n")
-    pipe.stdin.close()  #so pipe process will get an EOF signal
-    pipe.wait()
-    logging.info('exiting feeder from %s/%s to %s' % (dirName,fileName,str(pipe)))
-
-def writePipeToGPFS(dirName,fileName,pipe):
-    """Read outputs lines from a subprocess, and
-    feed them one by one into a gpfs shard."""
-    logging.info('started reader to %s/%s to %s' % (dirName,fileName,str(pipe)))
-    for line in pipe.stdout:
-        FS.append(dirName,fileName,line.strip())
-    logging.info('waiting for writing pipe to finish'+str(pipe))
-    pipe.wait()
-    logging.info('exiting reader to %s/%s to %s' % (dirName,fileName,str(pipe)))
-
-def shuffleMapOutputs(mapper,mapPipe,reducerQs,numReduceTasks):
-    """Thread that takes outputs of a map pipeline, hashes them, and
-    sticks them on the appropriate reduce queue."""
-    #maps shard index to a key->list defaultdict
-    shufbuf = collections.defaultdict(lambda:collections.defaultdict(list))
-    for line in mapPipe.stdout:
-        k = key(line)
-        h = hash(k) % numReduceTasks    # send to reducer buffer h
-        shufbuf[h][k].append(line)
-    logging.info('shuffleMapOutputs for '+str(mapPipe)+' sending buffer to reducerQs')
-    for h in shufbuf:
-        reducerQs[h].put(shufbuf[h])
-    mapPipe.wait()                      # wait for termination of mapper process
-    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done')
-
-def acceptReduceInputs(reducerQ,reducerBuf):
-    """Daemon thread that monitors a queue of items to add to a reducer
-    input buffer.  Items in the buffer are grouped by key."""
-    while True:
-        shufbuf = reducerQ.get()
-        nLines = 0
-        nKeys = 0
-        for key,lines in shufbuf.items():
-            nLines += len(lines)
-            nKeys += 1
-            reducerBuf[key].extend(lines)
-        logging.info('acceptReduceInputs accepted %d lines for %d keys' % (nLines,nKeys))
-        reducerQ.task_done()
-
-def sendReduceInputs(reducerBuf,reducePipe,j):
-    """Thread to send contents of a reducer buffer to a reduce process."""
-    for (k,lines) in reducerBuf.items():
-        for line in lines:
-            reducePipe.stdin.write(line)
-    reducePipe.stdin.close()
-    reducePipe.wait()                   # wait for termination of reducer
 
 ##############################################################################
 # server/client stuff
@@ -426,30 +379,31 @@ class MRSHandler(BaseHTTPRequestHandler):
                 self._sendList("Files in "+d,FS.listFiles(d))
             elif requestOp=="getmerge" and 'dir' in requestArgs:
                 d = requestArgs['dir']
-                buf = []
+                buf = ""
                 for f in FS.listFiles(d):
                     buf += FS.cat(d,f)
-                self._sendFile("\n".join(buf))
-            elif requestOp=="append":
+                #logging.info("buf is >>"+buf+"<<")
+                self._sendFile(buf)
+            elif requestOp=="write":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 line = requestArgs['line']
-                FS.append(d,f,line)
+                FS.write(d,f,line+'\n')
                 self._sendList("Appended to "+d+"/"+f,[line])
             elif requestOp=="cat":
                 d = requestArgs['dir']
                 f = requestArgs['file']
-                self._sendFile("\n".join(FS.cat(d,f)))
+                self._sendFile(FS.cat(d,f))
             elif requestOp=="head":
                 d = requestArgs['dir']
                 f = requestArgs['file']
-                n = requestArgs['n']
-                self._sendFile("\n".join(FS.head(d,f,int(n))))
+                n = int(requestArgs.get('n','512'))
+                self._sendFile(FS.head(d,f,n))
             elif requestOp=="tail":
                 d = requestArgs['dir']
                 f = requestArgs['file']
-                n = requestArgs['n']
-                self._sendFile("\n".join(FS.tail(d,f,int(n))))
+                n = int(requestArgs.get('n','512'))
+                self._sendFile(FS.tail(d,f,n))
             elif requestOp=="task":
                 try:
                     start = time.time()
@@ -494,7 +448,7 @@ def usage():
     print "usage: --serve: start server"
     print "usage: --shutdown: shutdown"
     print "usage: --send XXXX: simulate browser request http://server:port/XXXX and print response page"
-    print "  where requests are ls, ls?dir=XXX, append?dir=XXX&file=YYY&line=ZZZ, cat?dir=XXX&file=YYY,"
+    print "  where requests are ls, ls?dir=XXX, write?dir=XXX&file=YYY&line=ZZZ, cat?dir=XXX&file=YYY,"
     print "                     getmerge?dir=XXX, head?dir=XXX&file=YYY&n=NNN, tail?dir=XXX&file=YYY&n=NNN,"
     print "                     shutdown"
     print "usage: --task  --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]: map-only task"
