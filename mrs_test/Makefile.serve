@@ -97,3 +97,14 @@ parallel-events.txt:
 	$(MRS) --send 'getmerge?dir=events' | tail -n +2 > parallel-events.txt
 	$(MRS) --shutdown
 
+RAM=/mnt/ramdisk/mrs/
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+SUM='python sum-events.py'
+bigfile-times:
+	echo sharding
+	bash start-server.sh
+	time $(MRS) --task --input $(RAM)/bigfile1 --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	echo learning
+	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
+	$(MRS) --shutdown
+

@@ -302,12 +302,17 @@ def setupFiles(indir,outdir):
 
 def getInput(usingGPFS,indir,f):
     if 'input' in usingGPFS:
-        inputString = FS.cat(indir,f)
+        return FS.cat(indir,f)
     else:
-        inputString = ""
+        logging.info('loading lines from '+indir+"/"+f)
+        inputString = cStringIO.StringIO()
+        k = 0
         for line in open(indir+"/"+f):
-            inputString += line
-    return inputString
+            inputString.write(line)
+            k += 1
+            if k%10000==0: logging.info('loaded '+str(k)+' lines')
+        logging.info('loaded '+indir+"/"+f)
+        return inputString.getvalue()
 
 def putOutput(usingGPFS,outdir,f,outputString):
     if 'output' in usingGPFS:
