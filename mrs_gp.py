@@ -173,6 +173,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     # Set up a place to save the inputs to K reducers - each of which
     # is a buffer bj, which contains lines for shard K,
 
+    start = time.time()
     logging.info('starting reduce buffer queues')
     reducerQs = []        # task queues to join with later 
     reducerBuffers = []
@@ -184,6 +185,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         tj = threading.Thread(target=acceptReduceInputs, args=(qj,bj))
         tj.daemon = True
         tj.start()
+    logging.info('queues started: time %.3f' % (time.time()-start))
 
     # start the mappers - along with threads to shuffle their outputs
     # to the appropriate reducer task queue
@@ -199,15 +201,17 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         si = threading.Thread(target=shuffleMapOutputs, args=(usingGPFS,numReduceTasks,mapPipeI,indir,fi,reducerQs))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
+    logging.info('mappers started: time %.3f' % (time.time()-start))
 
     #wait for the map tasks, and to empty the queues
     joinAll(mappers,'mappers')        
+    logging.info('mappers joined: time %.3f' % (time.time()-start))
     joinAll(reducerQs,'reduce queues')
+    logging.info('reducer queues emptied: time %.3f' % (time.time()-start))
 
     # run the reduce processes, each of which is associated with a
     # thread that feeds it inputs from the j's reduce buffer.
 
-    logging.info('starting reduce processes and threads to feed these processes')
     reducers = []
     for j in range(numReduceTasks):    
         reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
@@ -216,9 +220,11 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
                               args=(usingGPFS,reducePipeJ,reducerBuffers[j],("part%05d" % j),outdir))
         uj.start()                      # uj will shut down reducePipeJ process on completion
         reducers.append(uj)
+    logging.info('reducers started: time %.3f' % (time.time()-start))
 
     #wait for the reduce tasks
     joinAll(reducers,'reducers')
+    logging.info('reducers joined: time %.3f' % (time.time()-start))
 
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
@@ -228,6 +234,7 @@ def maponly(indir,outdir,mapper):
     # start the mappers - each of which is a process that reads from
     # an input file, and outputs to the corresponding output file
 
+    start = time.time()
     logging.info('starting mappers')
     mapThreads = []
     for fi in infiles:
@@ -235,7 +242,9 @@ def maponly(indir,outdir,mapper):
         mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
         mapThreadI.start()
         mapThreads.append(mapThreadI)
+    logging.info('mappers started: time %.3f' % (time.time()-start))
     joinAll(mapThreads,'mappers')
+    logging.info('mappers joined: time %.3f' % (time.time()-start))
 
 #
 # routines attached to threads
@@ -261,14 +270,22 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
     sends them in the appropriate reduce queue."""
     #maps shard index to a key->list defaultdict
     logging.info('shuffleMapOutputs for mapper from %s/%s started' % (indir,f))
+    start = time.time()
     (output,logs) = mapPipe.communicate(input=getInput(usingGPFS,indir,f))
-    logging.info('shuffleMapOutputs for mapper from %s/%s communicated' % (indir,f))
+    logging.info('shuffleMapOutputs for mapper from %s/%s communicated: time %.3f' % (indir,f,(time.time()-start)))
+    buffers = []
+    for h in range(numReduceTasks):
+        buffers.append(cStringIO.StringIO())
     for line in cStringIO.StringIO(output):
         k = key(line)
         h = hash(k) % numReduceTasks    # send to reducer buffer h
-        reducerQs[h].put(line)
+        buffers[h].write(line)
+    logging.info('shuffleMapOutputs for mapper from %s/%s buffered: time %.3f' % (indir,f,(time.time()-start)))
     mapPipe.wait()                      # wait for termination of mapper process
-    logging.info('shuffleMapOutputs for pipe '+str(mapPipe)+' done')
+    logging.info('shuffleMapOutputs for mapper from %s/%s wait complete: time %.3f' % (indir,f,(time.time()-start)))
+    for h in range(numReduceTasks):    
+        if buffers[h]: reducerQs[h].put(buffers[h].getvalue())
+    logging.info('shuffleMapOutputs for mapper from  %s/%s done: time %.3f' % (indir,f,(time.time()-start)))
 
 def acceptReduceInputs(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer

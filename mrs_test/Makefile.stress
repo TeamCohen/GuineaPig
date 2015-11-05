@@ -72,6 +72,8 @@ simple-ram-times-sweep-k:
 
 learn-ram-times:
 	echo sharding
+	$(MRS) --serve
 	time $(MRS) --input $(RAM)/bigfile1 --output $(RAM)/bigfile1-sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
 	time $(MRS) --input $(RAM)/bigfile1-sharded --output $(RAM)/events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
+	$(MRS) --shutdown

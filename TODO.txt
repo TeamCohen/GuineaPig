@@ -5,8 +5,10 @@ Branching:
  | | | mrs_serve_opt
 
 Issue
- -- mrs_gp.py: multiple mapper processes seem to run very slow.....why?  resharding is ok,
- why is learning so darn so?
+ -- mrs_gp.py: much faster, needs stress testing and less debugging
+ -- TODO: better interface and logging
+    --- performTask outputs to _task.log/params, /time
+    --- mapreduce outputs to _mappers.log/..._reducers.log/... 
 
 ROBUSTNESS/ERRORS/DOCS:
  - writeup smallvoc-tfidf.py as an example

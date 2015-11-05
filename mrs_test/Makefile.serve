@@ -1,5 +1,5 @@
 MRS=pypy ../mrs_gp.py
-K=20
+K=3
 
 clean: 
 	rm -rf /tmp/test-copy
