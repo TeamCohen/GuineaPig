@@ -112,6 +112,9 @@ class GPFileSystem(object):
     def cat(self,d0,f):
         d = self._fixDir(d0)
         return self.linesOf[(d,f)].getvalue()
+    def size(self,d0,f):
+        d = self._fixDir(d0)
+        return len(self.linesOf[(d,f)].getvalue())
     def head(self,d0,f,n):
         d = self._fixDir(d0)
         return self.linesOf[(d,f)].getvalue()[:n]
@@ -174,7 +177,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     # is a buffer bj, which contains lines for shard K,
 
     start = time.time()
-    logging.info('starting reduce buffer queues')
+    logging.debug('starting reduce buffer queues')
     reducerQs = []        # task queues to join with later 
     reducerBuffers = []
     for j in range(numReduceTasks):
@@ -190,7 +193,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     # start the mappers - along with threads to shuffle their outputs
     # to the appropriate reducer task queue
 
-    logging.info('starting mapper processes and shuffler threads')
+    logging.debug('starting mapper processes and shuffler threads')
     mappers = []
     for fi in infiles:
         # WARNING: it doesn't seem to work well to start the processes
@@ -235,7 +238,7 @@ def maponly(indir,outdir,mapper):
     # an input file, and outputs to the corresponding output file
 
     start = time.time()
-    logging.info('starting mappers')
+    logging.debug('starting mappers')
     mapThreads = []
     for fi in infiles:
         mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
@@ -251,13 +254,10 @@ def maponly(indir,outdir,mapper):
 #
 
 def runMapper(usingGPFS,mapPipe,indir,f,outdir):
-    logging.info('runMapper for file '+indir+"/"+f+" > "+outdir+"/"+f)
+    logging.debug('runMapper for file '+indir+"/"+f+" > "+outdir+"/"+f)
     inputString=getInput(usingGPFS,indir,f)
-    #logging.info('before map inputString is >>'+inputString+"<<")
     (output,logs) = mapPipe.communicate(inputString)
     putOutput(usingGPFS,outdir,f,output)
-    #logging.info('after output output is >>'+FS.cat(outdir,f)+"<<")
-    #logging.info("output=inputString is "+(output==inputString))
     mapPipe.wait()
 
 def runReducer(usingGPFS,redPipe,buf,f,outdir):
@@ -272,7 +272,7 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
     logging.info('shuffleMapOutputs for mapper from %s/%s started' % (indir,f))
     start = time.time()
     (output,logs) = mapPipe.communicate(input=getInput(usingGPFS,indir,f))
-    logging.info('shuffleMapOutputs for mapper from %s/%s communicated: time %.3f' % (indir,f,(time.time()-start)))
+    logging.debug('shuffleMapOutputs for mapper from %s/%s communicated: time %.3f' % (indir,f,(time.time()-start)))
     buffers = []
     for h in range(numReduceTasks):
         buffers.append(cStringIO.StringIO())
@@ -280,9 +280,9 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
         k = key(line)
         h = hash(k) % numReduceTasks    # send to reducer buffer h
         buffers[h].write(line)
-    logging.info('shuffleMapOutputs for mapper from %s/%s buffered: time %.3f' % (indir,f,(time.time()-start)))
+    logging.debug('shuffleMapOutputs for mapper from %s/%s buffered: time %.3f' % (indir,f,(time.time()-start)))
     mapPipe.wait()                      # wait for termination of mapper process
-    logging.info('shuffleMapOutputs for mapper from %s/%s wait complete: time %.3f' % (indir,f,(time.time()-start)))
+    logging.debug('shuffleMapOutputs for mapper from %s/%s wait complete: time %.3f' % (indir,f,(time.time()-start)))
     for h in range(numReduceTasks):    
         if buffers[h]: reducerQs[h].put(buffers[h].getvalue())
     logging.info('shuffleMapOutputs for mapper from  %s/%s done: time %.3f' % (indir,f,(time.time()-start)))
@@ -321,14 +321,14 @@ def getInput(usingGPFS,indir,f):
     if 'input' in usingGPFS:
         return FS.cat(indir,f)
     else:
-        logging.info('loading lines from '+indir+"/"+f)
+        logging.debug('loading lines from '+indir+"/"+f)
         inputString = cStringIO.StringIO()
         k = 0
         for line in open(indir+"/"+f):
             inputString.write(line)
             k += 1
-            if k%10000==0: logging.info('loaded '+str(k)+' lines')
-        logging.info('loaded '+indir+"/"+f)
+            if k%10000==0: logging.debug('reading %d lines from file %s/%s' % (k,indir,f))
+        logging.debug('finished transferring from '+indir+"/"+f)
         return inputString.getvalue()
 
 def putOutput(usingGPFS,outdir,f,outputString):
@@ -345,10 +345,10 @@ def key(line):
 
 def joinAll(xs,msg):
     """Utility to join with all threads/queues in a list."""
-    logging.info('joining ' + str(len(xs))+' '+msg)
+    logging.debug('joining ' + str(len(xs))+' '+msg)
     for i,x in enumerate(xs):
         x.join()
-    logging.info('joined all '+msg)
+    logging.debug('joined all '+msg)
 
 
 ##############################################################################
@@ -364,15 +364,17 @@ keepRunning = True
 
 class MRSHandler(BaseHTTPRequestHandler):
     
-    def _sendList(self,title,items):
+    def _sendList(self,title,items,plain=False):
         self.send_response(200)
-        self.send_header('Content-type','text-html')
-        self.end_headers()
-        #print "leadin",leadin,"items",items
-        itemList = ''
-        if items:
-            itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, items) + ["</ul>"])
-        self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,title,itemList))
+        if plain:
+            self._sendFile("\n".join(items) + "\n")
+        else:
+            self.send_header('Content-type','text-html')
+            self.end_headers()
+            itemList = ''
+            if items:
+                itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, items) + ["</ul>"])
+            self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,title,itemList))
 
     def _sendFile(self,text):
         self.send_response(200)
@@ -381,7 +383,7 @@ class MRSHandler(BaseHTTPRequestHandler):
         self.wfile.write(text)
 
     def do_GET(self):
-        print "GET request "+self.path
+        #print "GET request "+self.path
         try:
             p = urlparse.urlparse(self.path)
             requestOp = p.path
@@ -389,29 +391,32 @@ class MRSHandler(BaseHTTPRequestHandler):
             #convert the dict of lists to a dict of items, since I
             # don't use multiple values for any key
             requestArgs = dict(map(lambda (key,valueList):(key,valueList[0]), requestArgs.items()))
-            print "request:",requestOp,requestArgs
+            #print "request:",requestOp,requestArgs
+            plain = 'plain' in requestArgs
             if requestOp=="shutdown":
                 global keepRunning
                 keepRunning = False
                 self._sendFile("shutting down")
             elif requestOp=="ls" and not 'dir' in requestArgs:
-                self._sendList("View listing",FS.listDirs())
+                self._sendList("View listing",FS.listDirs(),plain=plain)
             elif requestOp=="ls" and 'dir' in requestArgs:
                 d = requestArgs['dir']
-                self._sendList("Files in "+d,FS.listFiles(d))
+                self._sendList("Files in "+d,FS.listFiles(d),plain=plain)
             elif requestOp=="getmerge" and 'dir' in requestArgs:
                 d = requestArgs['dir']
                 buf = ""
                 for f in FS.listFiles(d):
                     buf += FS.cat(d,f)
-                #logging.info("buf is >>"+buf+"<<")
                 self._sendFile(buf)
             elif requestOp=="write":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 line = requestArgs['line']
                 FS.write(d,f,line+'\n')
-                self._sendList("Appended to "+d+"/"+f,[line])
+                if plain:
+                    self._sendFile("Line '%s' writted to %s/%s" % (line,d,f))
+                else:
+                    self._sendList("Appended to "+d+"/"+f,[line],plain=True)
             elif requestOp=="cat":
                 d = requestArgs['dir']
                 f = requestArgs['file']
@@ -433,13 +438,13 @@ class MRSHandler(BaseHTTPRequestHandler):
                     end = time.time()
                     stat =  "Task performed in %.2f sec" % (end-start)
                     print stat
-                    self._sendList(stat, map(str, requestArgs.items()))
+                    self._sendList(stat, map(str, requestArgs.items()) + [stat],plain=True)
                 except Exception:
                     self._sendFile(traceback.format_exc())
             else:
-                self._sendList("Error: unknown command "+requestOp,[self.path])
+                self._sendList("Error: unknown operation "+requestOp,[self.path],plain=plain)
         except KeyError:
-                self._sendList("Error: illegal command",[self.path])
+                self._sendList("Error: invalid command",[self.path],plain=plain)
   
 def runServer():
     server_address = ('127.0.0.1', 1969)
@@ -459,7 +464,8 @@ def sendRequest(command):
     response = conn.getresponse()
     print(response.status, response.reason)
     data_received = response.read()
-    print(data_received)
+    print "==== from server ===="
+    print(data_received),
     conn.close()
 
 ##############################################################################
@@ -469,33 +475,56 @@ def sendRequest(command):
 def usage():
     print "usage: --serve: start server"
     print "usage: --shutdown: shutdown"
+    print "usage: --fs ... "
+    print "  where commands are: ls, ls DIR, write DIR FILE LINE, cat DIR FILE, getmerge DIR, head DIR FILE N, tail  DIR FILE N",
     print "usage: --send XXXX: simulate browser request http://server:port/XXXX and print response page"
     print "  where requests are ls, ls?dir=XXX, write?dir=XXX&file=YYY&line=ZZZ, cat?dir=XXX&file=YYY,"
     print "                     getmerge?dir=XXX, head?dir=XXX&file=YYY&n=NNN, tail?dir=XXX&file=YYY&n=NNN,"
-    print "                     shutdown"
+    print "                     shutdown -- and option 'plain' means plain-text output"
+    print "  this is mainly for testing"
     print "usage: --task  --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]: map-only task"
     print "       --task --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]: map-reduce task"
     print "  where directories DIRi are local file directories OR gpfs:XXX"
+    print "  same options w/o --task will run the commands locally, not on the server"
 
 if __name__ == "__main__":
 
-    logging.basicConfig(level=logging.INFO)
-
-    argspec = ["serve", "send=", "shutdown", "task", "help", 
+    argspec = ["serve", "send=", "shutdown", "task", "help", "fs",
                "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
+    print optdict,args
     
     if "--serve" in optdict:
+        # log server to a file, since it runs in the background...
+        logging.basicConfig(filename="server.log",level=logging.INFO)
+        logging.info("server started....")
         runServer()
-    elif "--send" in optdict:
-        sendRequest(optdict['--send'])
-    elif "--shutdown" in optdict:
-        sendRequest("shutdown")
-    elif "--task" in optdict:
-        del optdict['--task']
-        sendRequest("task?" + urllib.urlencode(optdict))
-    elif "--help" in optdict or (not '--input' in optdict) or (not '--output' in optdict):
-        usage()
     else:
-        performTask(optdict)
+        logging.basicConfig(level=logging.INFO)        
+        if "--send" in optdict:
+            sendRequest(optdict['--send'])
+        elif "--shutdown" in optdict:
+            sendRequest("shutdown")
+        elif "--task" in optdict:
+            del optdict['--task']
+            sendRequest("task?" + urllib.urlencode(optdict))
+        elif "--help" in optdict:
+            usage()
+        elif "--fs" in optdict:
+            if not args: 
+                usage()
+            else:
+                request = args[0]+"?plain=1"
+                if len(args)>1: request += "&dir="+args[1]
+                if len(args)>2: request += "&file="+args[2]
+                if len(args)>3 and args[0]=="write": request += "&line="+args[3]
+                elif len(args)>3: request += "&n="+args[3]
+                print "request: "+request
+                sendRequest(request)
+        else:
+            if (not '--input' in optdict) or (not '--output' in optdict):
+                usage()
+            else:
+                performTask(optdict)
+
