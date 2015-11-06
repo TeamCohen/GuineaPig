@@ -361,8 +361,6 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 import urlparse
 
 keepRunning = True
-externalRequests = 0
-externalRequestLimit = 1
 
 class MRSHandler(BaseHTTPRequestHandler):
     
@@ -384,18 +382,14 @@ class MRSHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(text)
 
+    
+    # turn off request logging
+    def log_request(self,code=0,size=0):
+        pass
+
     def do_GET(self):
         #print "GET request "+self.path
-        global externalRequests,externalRequestLimit,keepRunning
-        (clientHost,clientPort) = self.client_address
-        (serverHost,serverPort) = self.server.server_address
-        if clientHost!=serverHost:
-            externalRequests += 1
-            if externalRequests >= externalRequestLimit:
-                keepRunning = False
-                self._sendFile("someone outside is probing me - shutting down")            
-            else:
-                self._sendFile("unauthorized")
+        global keepRunning
         try:
             p = urlparse.urlparse(self.path)
             requestOp = p.path
@@ -406,6 +400,7 @@ class MRSHandler(BaseHTTPRequestHandler):
             #print "request:",requestOp,requestArgs
             plain = 'plain' in requestArgs
             if requestOp=="/shutdown":
+                global keepRunning
                 keepRunning = False
                 self._sendFile("shutting down")
             elif requestOp=="/ls" and not 'dir' in requestArgs:
@@ -425,7 +420,7 @@ class MRSHandler(BaseHTTPRequestHandler):
                 line = requestArgs['line']
                 FS.write(d,f,line+'\n')
                 if plain:
-                    self._sendFile("Line '%s' writted to %s/%s" % (line,d,f))
+                    self._sendFile("Line '%s' written to %s/%s" % (line,d,f))
                 else:
                     self._sendList("Appended to "+d+"/"+f,[line],plain=True)
             elif requestOp=="/cat":
@@ -453,12 +448,15 @@ class MRSHandler(BaseHTTPRequestHandler):
                 except Exception:
                     self._sendFile(traceback.format_exc())
             else:
-                self._sendList("Error: unknown operation "+requestOp,[self.path],plain=plain)
+                self.send_error(400,"Error: unknown command '"+requestOp + "' in request '"+self.path+"'")
         except KeyError:
-                self._sendList("Error: invalid command",[self.path],plain=plain)
+                self.send_error(400,"Error: can't process request "+self.path)
   
 def runServer():
+    #allow only access from local machine
     server_address = ('127.0.0.1', 1969)
+    #allow access from anywhere
+    #server_address = ('0.0.0.0', 1969)    
     httpd = HTTPServer(server_address, MRSHandler)
     print('http server is running on port 1969...')
     while keepRunning:
@@ -473,9 +471,9 @@ def sendRequest(command):
     conn = httplib.HTTPConnection(http_server)
     conn.request("GET", command)
     response = conn.getresponse()
-    print(response.status, response.reason)
+    #print(response.status, response.reason)
     data_received = response.read()
-    print "==== from server ===="
+    #print "==== from server ===="
     print(data_received),
     conn.close()
 
@@ -504,7 +502,7 @@ if __name__ == "__main__":
                "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
-    print optdict,args
+    #print optdict,args
     
     if "--serve" in optdict:
         # log server to a file, since it runs in the background...
@@ -531,7 +529,7 @@ if __name__ == "__main__":
                 if len(args)>2: request += "&file="+args[2]
                 if len(args)>3 and args[0]=="write": request += "&line="+args[3]
                 elif len(args)>3: request += "&n="+args[3]
-                print "request: "+request
+                #print "request: "+request
                 sendRequest(request)
         else:
             if (not '--input' in optdict) or (not '--output' in optdict):
