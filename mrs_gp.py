@@ -361,6 +361,8 @@ from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 import urlparse
 
 keepRunning = True
+externalRequests = 0
+externalRequestLimit = 1
 
 class MRSHandler(BaseHTTPRequestHandler):
     
@@ -369,7 +371,7 @@ class MRSHandler(BaseHTTPRequestHandler):
         if plain:
             self._sendFile("\n".join(items) + "\n")
         else:
-            self.send_header('Content-type','text-html')
+            self.send_header('Content-type','text/html')
             self.end_headers()
             itemList = ''
             if items:
@@ -378,12 +380,22 @@ class MRSHandler(BaseHTTPRequestHandler):
 
     def _sendFile(self,text):
         self.send_response(200)
-        self.send_header('Content-type','text-plain')
+        self.send_header('Content-type','text/plain')
         self.end_headers()
         self.wfile.write(text)
 
     def do_GET(self):
         #print "GET request "+self.path
+        global externalRequests,externalRequestLimit,keepRunning
+        (clientHost,clientPort) = self.client_address
+        (serverHost,serverPort) = self.server.server_address
+        if clientHost!=serverHost:
+            externalRequests += 1
+            if externalRequests >= externalRequestLimit:
+                keepRunning = False
+                self._sendFile("someone outside is probing me - shutting down")            
+            else:
+                self._sendFile("unauthorized")
         try:
             p = urlparse.urlparse(self.path)
             requestOp = p.path
@@ -393,22 +405,21 @@ class MRSHandler(BaseHTTPRequestHandler):
             requestArgs = dict(map(lambda (key,valueList):(key,valueList[0]), requestArgs.items()))
             #print "request:",requestOp,requestArgs
             plain = 'plain' in requestArgs
-            if requestOp=="shutdown":
-                global keepRunning
+            if requestOp=="/shutdown":
                 keepRunning = False
                 self._sendFile("shutting down")
-            elif requestOp=="ls" and not 'dir' in requestArgs:
+            elif requestOp=="/ls" and not 'dir' in requestArgs:
                 self._sendList("View listing",FS.listDirs(),plain=plain)
-            elif requestOp=="ls" and 'dir' in requestArgs:
+            elif requestOp=="/ls" and 'dir' in requestArgs:
                 d = requestArgs['dir']
                 self._sendList("Files in "+d,FS.listFiles(d),plain=plain)
-            elif requestOp=="getmerge" and 'dir' in requestArgs:
+            elif requestOp=="/getmerge" and 'dir' in requestArgs:
                 d = requestArgs['dir']
                 buf = ""
                 for f in FS.listFiles(d):
                     buf += FS.cat(d,f)
                 self._sendFile(buf)
-            elif requestOp=="write":
+            elif requestOp=="/write":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 line = requestArgs['line']
@@ -417,21 +428,21 @@ class MRSHandler(BaseHTTPRequestHandler):
                     self._sendFile("Line '%s' writted to %s/%s" % (line,d,f))
                 else:
                     self._sendList("Appended to "+d+"/"+f,[line],plain=True)
-            elif requestOp=="cat":
+            elif requestOp=="/cat":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 self._sendFile(FS.cat(d,f))
-            elif requestOp=="head":
+            elif requestOp=="/head":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 n = int(requestArgs.get('n','512'))
                 self._sendFile(FS.head(d,f,n))
-            elif requestOp=="tail":
+            elif requestOp=="/tail":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 n = int(requestArgs.get('n','512'))
                 self._sendFile(FS.tail(d,f,n))
-            elif requestOp=="task":
+            elif requestOp=="/task":
                 try:
                     start = time.time()
                     performTask(requestArgs)
@@ -505,17 +516,17 @@ if __name__ == "__main__":
         if "--send" in optdict:
             sendRequest(optdict['--send'])
         elif "--shutdown" in optdict:
-            sendRequest("shutdown")
+            sendRequest("/shutdown")
         elif "--task" in optdict:
             del optdict['--task']
-            sendRequest("task?" + urllib.urlencode(optdict))
+            sendRequest("/task?" + urllib.urlencode(optdict))
         elif "--help" in optdict:
             usage()
         elif "--fs" in optdict:
             if not args: 
                 usage()
             else:
-                request = args[0]+"?plain=1"
+                request = "/"+args[0]+"?plain=1"
                 if len(args)>1: request += "&dir="+args[1]
                 if len(args)>2: request += "&file="+args[2]
                 if len(args)>3 and args[0]=="write": request += "&line="+args[3]
