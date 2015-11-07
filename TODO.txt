@@ -6,8 +6,9 @@ Branching:
 
 TODO for mrs_gp.py:
  -- mrs_gp.py: much faster, needs stress testing 
- --- security!
- --- clean up --fs interface
+ --- security! = done
+ --- clean up --fs interface = done
+ --- add /favicon.ico handler
  --- error/task tracking: failed tasks should return failure
  --- logging
     --- performTask outputs to _task.log/....
