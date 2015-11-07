@@ -364,24 +364,40 @@ keepRunning = True
 
 class MRSHandler(BaseHTTPRequestHandler):
     
-    def _sendList(self,title,items,plain=False):
-        self.send_response(200)
-        if plain:
+    def _sendList(self,items,html):
+        if not html:
             self._sendFile("\n".join(items) + "\n")
         else:
+            def markup(it):
+                if it.startswith(" files:"):
+                    keyword,n,f = it.split()
+                    return it + (' ' * (30-len(f))) + '[<a href="/ls?html=1&dir=%s">ls %s</a>]' % (f,f)
+                elif it.startswith(" chars:"):
+                    keyword,n,df = it.split()
+                    d,f = df.split("/")
+                    return it + (' ' * (30-len(df))) \
+                        + '[<a href="/cat?html=1&dir=%s&file=%s">cat</a>' % (d,f) \
+                        + '|<a href="/cat?html=1&dir=%s&file=%s">head</a>' % (d,f) \
+                        + '|<a href="/cat?html=1&dir=%s&file=%s">tail</a>]' % (d,f)
+            self.send_response(200)
             self.send_header('Content-type','text/html')
-            self.end_headers()
-            itemList = ''
-            if items:
-                itemList = "\n".join(["<ul>"] + map(lambda it:"<li>%s" % it, items) + ["</ul>"])
-            self.wfile.write("<html><head>%s</head>\n<body>\n%s%s\n</body></html>\n" % (title,title,itemList))
+            self.end_headers()            
+            self.wfile.write("<html><head><title>MRS GP Output</title></head>\n")
+            self.wfile.write("<body>\n")
+            self.wfile.write("<hr/>\n")
+            self.wfile.write("<pre>\n")
+            for it in items:
+                self.wfile.write(markup(it) + "\n")
+            self.wfile.write("</pre>\n")
+            self.wfile.write("<hr/>\n")
+            self.wfile.write('<a href="/ls?html=1">List top level</a>')
+            self.wfile.write("</body></html>\n")
 
     def _sendFile(self,text):
         self.send_response(200)
         self.send_header('Content-type','text/plain')
         self.end_headers()
         self.wfile.write(text)
-
     
     # turn off request logging
     def log_request(self,code=0,size=0):
@@ -397,32 +413,29 @@ class MRSHandler(BaseHTTPRequestHandler):
             #convert the dict of lists to a dict of items, since I
             # don't use multiple values for any key
             requestArgs = dict(map(lambda (key,valueList):(key,valueList[0]), requestArgs.items()))
+            html = 'html' in requestArgs
             #print "request:",requestOp,requestArgs
-            plain = 'plain' in requestArgs
             if requestOp=="/shutdown":
                 global keepRunning
                 keepRunning = False
-                self._sendFile("shutting down")
+                self._sendFile("Shutting down")
             elif requestOp=="/ls" and not 'dir' in requestArgs:
-                self._sendList("View listing",FS.listDirs(),plain=plain)
+                def fmtdir(d): return ' files: %3d  %s' % (len(FS.listFiles(d)),d)
+                self._sendList(map(fmtdir, FS.listDirs()),html)
             elif requestOp=="/ls" and 'dir' in requestArgs:
                 d = requestArgs['dir']
-                self._sendList("Files in "+d,FS.listFiles(d),plain=plain)
+                def fmtfile(f): return ' chars: %6d  %s/%s' % (len(FS.cat(d,f)),d,f)
+                self._sendList(map(fmtfile,FS.listFiles(d)),html)
             elif requestOp=="/getmerge" and 'dir' in requestArgs:
                 d = requestArgs['dir']
-                buf = ""
-                for f in FS.listFiles(d):
-                    buf += FS.cat(d,f)
+                buf = "".join(map(lambda f:FS.cat(d,f),FS.listFiles(d)))
                 self._sendFile(buf)
             elif requestOp=="/write":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 line = requestArgs['line']
                 FS.write(d,f,line+'\n')
-                if plain:
-                    self._sendFile("Line '%s' written to %s/%s" % (line,d,f))
-                else:
-                    self._sendList("Appended to "+d+"/"+f,[line],plain=True)
+                self._sendFile("Line '%s' written to %s/%s" % (line,d,f))
             elif requestOp=="/cat":
                 d = requestArgs['dir']
                 f = requestArgs['file']
@@ -430,12 +443,12 @@ class MRSHandler(BaseHTTPRequestHandler):
             elif requestOp=="/head":
                 d = requestArgs['dir']
                 f = requestArgs['file']
-                n = int(requestArgs.get('n','512'))
+                n = int(requestArgs.get('n','2048'))
                 self._sendFile(FS.head(d,f,n))
             elif requestOp=="/tail":
                 d = requestArgs['dir']
                 f = requestArgs['file']
-                n = int(requestArgs.get('n','512'))
+                n = int(requestArgs.get('n','2048'))
                 self._sendFile(FS.tail(d,f,n))
             elif requestOp=="/task":
                 try:
@@ -443,14 +456,13 @@ class MRSHandler(BaseHTTPRequestHandler):
                     performTask(requestArgs)
                     end = time.time()
                     stat =  "Task performed in %.2f sec" % (end-start)
-                    print stat
-                    self._sendList(stat, map(str, requestArgs.items()) + [stat],plain=True)
+                    self._sendList(map(str, requestArgs.items()) + [stat],html)
                 except Exception:
                     self._sendFile(traceback.format_exc())
             else:
-                self.send_error(400,"Error: unknown command '"+requestOp + "' in request '"+self.path+"'")
+                self.send_error(400,"Unknown command '"+requestOp + "' in request '"+self.path+"'")
         except KeyError:
-                self.send_error(400,"Error: can't process request "+self.path)
+                self.send_error(400,"Illegal request "+self.path)
   
 def runServer():
     #allow only access from local machine
@@ -471,11 +483,13 @@ def sendRequest(command):
     conn = httplib.HTTPConnection(http_server)
     conn.request("GET", command)
     response = conn.getresponse()
-    #print(response.status, response.reason)
-    data_received = response.read()
-    #print "==== from server ===="
-    print(data_received),
-    conn.close()
+    if response.status==200:
+        data_received = response.read()
+        conn.close()
+        print data_received,
+    else:
+        conn.close()        
+        raise Exception('%d %s' % (response.status,response.reason))
 
 ##############################################################################
 # main
@@ -489,7 +503,7 @@ def usage():
     print "usage: --send XXXX: simulate browser request http://server:port/XXXX and print response page"
     print "  where requests are ls, ls?dir=XXX, write?dir=XXX&file=YYY&line=ZZZ, cat?dir=XXX&file=YYY,"
     print "                     getmerge?dir=XXX, head?dir=XXX&file=YYY&n=NNN, tail?dir=XXX&file=YYY&n=NNN,"
-    print "                     shutdown -- and option 'plain' means plain-text output"
+    print "                     shutdown -- and option 'html' means html output"
     print "  this is mainly for testing"
     print "usage: --task  --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]: map-only task"
     print "       --task --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]: map-reduce task"
@@ -524,7 +538,7 @@ if __name__ == "__main__":
             if not args: 
                 usage()
             else:
-                request = "/"+args[0]+"?plain=1"
+                request = "/"+args[0]+"?plain"
                 if len(args)>1: request += "&dir="+args[1]
                 if len(args)>2: request += "&file="+args[2]
                 if len(args)>3 and args[0]=="write": request += "&line="+args[3]
