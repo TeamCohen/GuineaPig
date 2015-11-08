@@ -151,20 +151,65 @@ FS = GPFileSystem()
 #
 ##############################################################################
 
+
+class TaskStats(object):
+    def __init__(self,opdict):
+        self.opts = opdict.copy()
+        self.startTime = {}
+        self.endTime = {}
+        self.inputSize = {}
+        self.outputSize = {}
+        self.logSize = {}
+    def start(self,msg):
+        """Start timing something."""
+        self.startTime[msg] = time.time()
+        logging.info('started  '+msg)
+    def end(self,msg):
+        """End timing something."""
+        self.endTime[msg] = time.time()
+        logging.info('finished '+msg + ' in %.3f sec' % (self.endTime[msg]-self.startTime[msg]))
+    def report(self):
+        buf = []
+        for k in sorted(self.opts.keys()):
+            buf.append('%-40s : %s' % (k,self.opts[k]))
+        now = time.time()
+        for k in sorted(self.startTime.keys()):
+            if k in self.endTime:
+                buf.append('%-40s : finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k]))
+            else:
+                buf.append('%30s: running for %.3f sec' % (k,now-self.startTime[k]))
+        return buf
+
+TASK_STATS = None
+
+# prevent multiple tasks from happening at the same time
+TASK_LOCK = threading.Lock()
+
 def performTask(optdict):
     """Utility that calls mapreduce or maponly, as appropriate, based on the options."""
-    indir = optdict['--input']
-    outdir = optdict['--output']
-    if '--reducer' in optdict:
-        #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
-        mapper = optdict.get('--mapper','cat')
-        reducer = optdict.get('--reducer','cat')
-        numReduceTasks = int(optdict.get('--numReduceTasks','1'))
-        mapreduce(indir,outdir,mapper,reducer,numReduceTasks)
-    else:
-        #usage 1: a map-only task has --input, --output, --mapper
-        mapper = optdict.get('--mapper','cat')
-        maponly(indir,outdir,mapper)        
+    TASK_LOCK.acquire()
+    try:
+        # maintain some statistics for this task
+        global TASK_STATS
+        TASK_STATS = TaskStats(optdict)
+        TASK_STATS.start('__top level task')
+
+        indir = optdict['--input']
+        outdir = optdict['--output']
+        if '--reducer' in optdict:
+            #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
+            mapper = optdict.get('--mapper','cat')
+            reducer = optdict.get('--reducer','cat')
+            numReduceTasks = int(optdict.get('--numReduceTasks','1'))
+            mapreduce(indir,outdir,mapper,reducer,numReduceTasks)
+        else:
+            #usage 1: a map-only task has --input, --output, --mapper
+            mapper = optdict.get('--mapper','cat')
+            maponly(indir,outdir,mapper)        
+        TASK_STATS.end('__top level task')
+
+    finally:
+        TASK_LOCK.release()
 
 def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     """Run a generic streaming map-reduce process.  The mapper and reducer
@@ -172,12 +217,13 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     are directories."""
 
     usingGPFS,infiles = setupFiles(indir,outdir)
+    global TASK_STATS
 
     # Set up a place to save the inputs to K reducers - each of which
     # is a buffer bj, which contains lines for shard K,
 
-    start = time.time()
-    logging.debug('starting reduce buffer queues')
+
+    TASK_STATS.start('_init reduce buffer queues')
     reducerQs = []        # task queues to join with later 
     reducerBuffers = []
     for j in range(numReduceTasks):
@@ -188,12 +234,12 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         tj = threading.Thread(target=acceptReduceInputs, args=(qj,bj))
         tj.daemon = True
         tj.start()
-    logging.info('queues started: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_init reduce buffer queues')
 
     # start the mappers - along with threads to shuffle their outputs
     # to the appropriate reducer task queue
 
-    logging.debug('starting mapper processes and shuffler threads')
+    TASK_STATS.start('_init mappers and shufflers')
     mappers = []
     for fi in infiles:
         # WARNING: it doesn't seem to work well to start the processes
@@ -204,17 +250,21 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         si = threading.Thread(target=shuffleMapOutputs, args=(usingGPFS,numReduceTasks,mapPipeI,indir,fi,reducerQs))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
-    logging.info('mappers started: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_init mappers and shufflers')
 
     #wait for the map tasks, and to empty the queues
+    TASK_STATS.start('_join mappers')
     joinAll(mappers,'mappers')        
-    logging.info('mappers joined: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_join mappers')
+
+    TASK_STATS.start('_join reducer queues')
     joinAll(reducerQs,'reduce queues')
-    logging.info('reducer queues emptied: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_join reducer queues')
 
     # run the reduce processes, each of which is associated with a
     # thread that feeds it inputs from the j's reduce buffer.
 
+    TASK_STATS.start('_init reducers')
     reducers = []
     for j in range(numReduceTasks):    
         reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
@@ -223,58 +273,63 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
                               args=(usingGPFS,reducePipeJ,reducerBuffers[j],("part%05d" % j),outdir))
         uj.start()                      # uj will shut down reducePipeJ process on completion
         reducers.append(uj)
-    logging.info('reducers started: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_init reducers')
 
     #wait for the reduce tasks
+    TASK_STATS.start('_join reducers')
     joinAll(reducers,'reducers')
-    logging.info('reducers joined: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_join reducers')
 
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
 
     usingGPFS,infiles = setupFiles(indir,outdir)
+    global TASK_STATS
 
     # start the mappers - each of which is a process that reads from
     # an input file, and outputs to the corresponding output file
 
     start = time.time()
-    logging.debug('starting mappers')
+    TASK_STATS.start('_init mappers')
     mapThreads = []
     for fi in infiles:
         mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
         mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
         mapThreadI.start()
         mapThreads.append(mapThreadI)
-    logging.info('mappers started: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_init mappers')
+
+    TASK_STATS.start('_join mappers')
     joinAll(mapThreads,'mappers')
-    logging.info('mappers joined: time %.3f' % (time.time()-start))
+    TASK_STATS.end('_join mappers')
 
 #
 # routines attached to threads
 #
 
 def runMapper(usingGPFS,mapPipe,indir,f,outdir):
-    logging.debug('runMapper for file '+indir+"/"+f+" > "+outdir+"/"+f)
     inputString=getInput(usingGPFS,indir,f)
-    (output,logs) = mapPipe.communicate(inputString)
-    if mapPipe.returncode:
-        logging.warn("mapper from %s/%s to %s/%s fails with return code %d" % (indir,f,outdir,f,mapPipe.returncode))
+    output = logCommunication(
+        mapPipe,inputString,
+        'mapper from %s/%s to %s/%s' % (indir,f,outdir,f))
     putOutput(usingGPFS,outdir,f,output)
-    mapPipe.wait()
 
 def runReducer(usingGPFS,redPipe,buf,f,outdir):
-    (output,logs) = redPipe.communicate(input=buf.getvalue())
+    output = logCommunication(
+        redPipe,buf.getvalue(),
+        'reducer to %s/%s' % (outdir,f))
     putOutput(usingGPFS,outdir,f,output)
-    redPipe.wait()
 
 def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
     """Thread that takes outputs of a map pipeline, hashes them, and
     sends them in the appropriate reduce queue."""
     #maps shard index to a key->list defaultdict
-    logging.info('shuffleMapOutputs for mapper from %s/%s started' % (indir,f))
     start = time.time()
-    (output,logs) = mapPipe.communicate(input=getInput(usingGPFS,indir,f))
-    logging.debug('shuffleMapOutputs for mapper from %s/%s communicated: time %.3f' % (indir,f,(time.time()-start)))
+    output = logCommunication(
+        mapPipe, getInput(usingGPFS,indir,f),
+        'mapper from %s/%s to reducers' % (indir,f))
+    global TASK_STATS
+    TASK_STATS.start('shuffling output of mapper from %s/%s' % (indir,f))
     buffers = []
     for h in range(numReduceTasks):
         buffers.append(cStringIO.StringIO())
@@ -282,12 +337,9 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
         k = key(line)
         h = hash(k) % numReduceTasks    # send to reducer buffer h
         buffers[h].write(line)
-    logging.debug('shuffleMapOutputs for mapper from %s/%s buffered: time %.3f' % (indir,f,(time.time()-start)))
-    mapPipe.wait()                      # wait for termination of mapper process
-    logging.debug('shuffleMapOutputs for mapper from %s/%s wait complete: time %.3f' % (indir,f,(time.time()-start)))
     for h in range(numReduceTasks):    
         if buffers[h]: reducerQs[h].put(buffers[h].getvalue())
-    logging.info('shuffleMapOutputs for mapper from  %s/%s done: time %.3f' % (indir,f,(time.time()-start)))
+    TASK_STATS.end('shuffling output of mapper from %s/%s' % (indir,f))
 
 def acceptReduceInputs(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer
@@ -296,12 +348,26 @@ def acceptReduceInputs(reducerQ,reducerBuf):
         line = reducerQ.get()
         reducerBuf.write(line)
         reducerQ.task_done()
-
 #
 # subroutines for map-reduce
 #
 
+def logCommunication(pipe,inputString,pipeTag):
+    global TASK_STATS
+    TASK_STATS.start(pipeTag)
+    (output,logs) = pipe.communicate(input=inputString)    
+    if pipe.returncode:
+        logging.warn("%s failed with return code %d" % (pipeTag,pipe.returncode))
+    pipe.wait()
+    TASK_STATS.end(pipeTag)
+    return output
+
 def setupFiles(indir,outdir):
+    """Work out what the input files are, and clear the output directory,
+    if needed.  Returns a (usingGPFS,files) where the set usingGPFS
+    contains 'input' if the input is on FS, and 'output' if the output
+    is on the FS'; and files is a list of input files.
+    """
     usingGPFS = set()
     if indir.startswith("gpfs:"):
         usingGPFS.add('input')
@@ -320,6 +386,7 @@ def setupFiles(indir,outdir):
     return usingGPFS,infiles
 
 def getInput(usingGPFS,indir,f):
+    """Return the content of the input file at indir/f"""
     if 'input' in usingGPFS:
         return FS.cat(indir,f)
     else:
@@ -334,6 +401,7 @@ def getInput(usingGPFS,indir,f):
         return inputString.getvalue()
 
 def putOutput(usingGPFS,outdir,f,outputString):
+    """Store the output string in outdir/f"""
     if 'output' in usingGPFS:
         FS.write(outdir,f,outputString)
     else:
@@ -458,11 +526,8 @@ class MRSHandler(BaseHTTPRequestHandler):
                     (serverHost,serverPort) = self.server.server_address
                     if (clientHost!=serverHost):
                         raise Exception("externally submitted task!")
-                    start = time.time()
                     performTask(requestArgs)
-                    end = time.time()
-                    stat =  "Task performed in %.2f sec" % (end-start)
-                    self._sendList(map(str, requestArgs.items()) + [stat],html)
+                    self._sendList(TASK_STATS.report(), html)
                 except Exception:
                     self._sendFile(traceback.format_exc())
             else:
