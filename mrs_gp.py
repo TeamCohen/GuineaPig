@@ -257,6 +257,8 @@ def runMapper(usingGPFS,mapPipe,indir,f,outdir):
     logging.debug('runMapper for file '+indir+"/"+f+" > "+outdir+"/"+f)
     inputString=getInput(usingGPFS,indir,f)
     (output,logs) = mapPipe.communicate(inputString)
+    if mapPipe.returncode:
+        logging.warn("mapper from %s/%s to %s/%s fails with return code %d" % (indir,f,outdir,f,mapPipe.returncode))
     putOutput(usingGPFS,outdir,f,output)
     mapPipe.wait()
 
@@ -452,6 +454,10 @@ class MRSHandler(BaseHTTPRequestHandler):
                 self._sendFile(FS.tail(d,f,n))
             elif requestOp=="/task":
                 try:
+                    (clientHost,clientPort) = self.client_address
+                    (serverHost,serverPort) = self.server.server_address
+                    if (clientHost!=serverHost):
+                        raise Exception("externally submitted task!")
                     start = time.time()
                     performTask(requestArgs)
                     end = time.time()
