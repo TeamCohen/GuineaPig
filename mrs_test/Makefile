@@ -1,5 +1,5 @@
-MRS=python ../mrs_gp.py
-K=3
+MRS=pypy ../mrs_gp.py
+K=10
 
 #
 clean: 
@@ -39,9 +39,7 @@ down:
 	$(MRS) --shutdown
 
 shard-fixed-server:
-	echo bash start-server.sh
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
-	echo echo $(MRS) --shutdown
 
 reshard:
 	make -f Makefile.serve shard
@@ -97,7 +95,7 @@ roundtrip-reshard:
 	sort /tmp/test-copy/* | sum
 
 parallel-events.txt: 
-	bash start-server.sh
+	echo bash start-server.sh
 	echo sharding to $(K) shards
 	time  $(MRS) --task --input unsharded --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo training naive bayes in parallel
@@ -106,7 +104,7 @@ parallel-events.txt:
 		--reducer 'python sum-events.py'
 	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' 
 	echo export
-	$(MRS) --send '/getmerge?dir=events' | tail -n +2 > parallel-events.txt
+	$(MRS) --send '/getmerge?dir=events' > parallel-events.txt
 	echo $(MRS) --shutdown
 
 # --streamTrain 100
@@ -122,11 +120,11 @@ NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
 SUM='python sum-events.py'
 bigfile-times:
 	echo sharding
-	bash start-server.sh
+	echo bash start-server.sh
 	time $(MRS) --task --input $(RAM)/bigfile1 --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
 	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
-	$(MRS) --shutdown
+	echo $(MRS) --shutdown
 
 bigfile-baseline-time:
 	time `cat /mnt/ramdisk/mrs/bigfile1/test.txt | python streamNaiveBayesLearner.py --streamTrain 100 | sort -k1 | python sum-events.py > /dev/null`

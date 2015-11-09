@@ -22,9 +22,6 @@ import cStringIO
 # To do:
 #  map-only tasks, multiple map inputs
 #  secondary grouping sort key --joinmode
-#  optimize - keys, IOString?
-#  have a no-server compatibility mode (or, for compute-intensive tasks)
-#  default n=10 for head, tail
 #
 # Gotchas/bugs:
 #   - threading doesn't work right in jython, and doesn't help
@@ -68,26 +65,35 @@ import cStringIO
 #  cat?dir=X&file=Y, and head and tail which are like cat but also
 #  have an argument "n".
 #
-#  Or, you can use 'pypy mrs_gp.py --send XXX' instead, which emulates
-#  the browser command and prints the text that would be sent to the
-#  browser.
+#  Or, you can use 'pypy mrs_gp.py --fs XXX' instead.
 #
 # 3) Shut down the server, discarding everything held by the
 # GPFileSystem.
 #
 #  pypy mrs_gp.py --shutdown
 #
+# This seems a bit buggy with multi-threading. 
+#
 ##############################################################################
 
 ##############################################################################
 #
-# shared "files system"
+# shared "file system"
 #
 ##############################################################################
 
 class GPFileSystem(object):
+    """Very simple in-memory file system.  The system is two-level -
+    directories and files - not heirarchical.  Files are specified by
+    a directory, file pair.  The directory can optionally be prefixed
+    by the string 'gpfs:'.
+    """
+    # these are prefixes for pretty-printed directory listing, used
+    # before the number of files in a directory or number of chars in
+    # a file.
     FILES_MARKER = ' files: '
     CHARS_MARKER = ' chars: '
+
     def __init__(self):
         #file names in directory/shards
         self.filesIn = collections.defaultdict(list)
@@ -95,47 +101,71 @@ class GPFileSystem(object):
         self.linesOf = {}
 
     def rmDir(self,d0):
+        """Clear a directory and all files below it."""
         d = self._fixDir(d0)
         if d in self.filesIn:
             for f in self.filesIn[d]:
                 del self.linesOf[(d,f)]
             del self.filesIn[d]
+
     def write(self,d0,f,line):
+        """Write to the end of the file d0/f"""
         d = self._fixDir(d0)
         if not f in self.filesIn[d]:
             self.filesIn[d].append(f)
             self.linesOf[(d,f)] = cStringIO.StringIO()
         self.linesOf[(d,f)].write(line)
+
     def listDirs(self,pretty=False):
-        result = self.filesIn.keys()
+        """Return a list of names of directories in the file system.  If
+        pretty=True, give a a list for each directory with a little more
+        information, sort of like the output of ls -l.
+        """
+        result = sorted(self.filesIn.keys())
         if not pretty: 
             return result
         else:
             def fmtdir(d): return '%s%3d  %s' % (GPFileSystem.FILES_MARKER,len(FS.listFiles(d)),d)
             return map(fmtdir,result)
+
     def listFiles(self,d0,pretty=False):
+        """Return a list of names of files in a directory.  If pretty=True,
+        give a a list for each directory with a little more
+        information, sort of like the output of ls -l.
+        """
         d = self._fixDir(d0)
-        result = self.filesIn[d]
+        result = sorted(self.filesIn[d])
         if not pretty: 
             return result
         else:
-            def fmtfile(f): return '%s%6d  %s/%s' % (GPFileSystem.CHARS_MARKER,len(FS.cat(d,f)),d,f)
+            def fmtfile(f): return '%s%6d  %s/%s' % (GPFileSystem.CHARS_MARKER,self.size(d,f),d,f)
             return map(fmtfile,result)
+
     def cat(self,d0,f):
+        """Return the contents of a file."""
         d = self._fixDir(d0)
         return self.linesOf[(d,f)].getvalue()
+
     def size(self,d0,f):
+        """Return the size of a file."""
         d = self._fixDir(d0)
         return len(self.linesOf[(d,f)].getvalue())
+
     def head(self,d0,f,n):
+        """Return the first n characters of a file."""
         d = self._fixDir(d0)
         return self.linesOf[(d,f)].getvalue()[:n]
+
     def tail(self,d0,f,n):
+        """Return the last n characters of a file."""
         d = self._fixDir(d0)
         return self.linesOf[(d,f)].getvalue()[-n:]
+
     def __str__(self):
         return "FS("+str(self.filesIn)+";"+str(self.linesOf)+")"
+
     def _fixDir(self,d):
+        """Strip the prefix gpfs: if it is present."""
         return d if not d.startswith("gpfs:") else d[len("gpfs:"):]
 
 # global file system used by map-reduce system
@@ -161,10 +191,12 @@ FS = GPFileSystem()
 # Each queue is monitored by a queue-specific thread which adds
 # map-output sharded data to the reducerBuffer for that shard.
 #
+# actions are tracked by a global TaskStats object.
+#
 ##############################################################################
 
-
 class TaskStats(object):
+
     def __init__(self,opdict):
         self.opts = opdict.copy()
         self.startTime = {}
@@ -172,35 +204,44 @@ class TaskStats(object):
         self.inputSize = {}
         self.outputSize = {}
         self.logSize = {}
+        self.numStarted = {'mapper':0, 'reducer':0}
+        self.numFinished = {'mapper':0, 'reducer':0}
+
     def start(self,msg):
         """Start timing something."""
         self.startTime[msg] = time.time()
         logging.info('started  '+msg)
+
     def end(self,msg):
         """End timing something."""
         self.endTime[msg] = time.time()
         logging.info('finished '+msg + ' in %.3f sec' % (self.endTime[msg]-self.startTime[msg]))
+
     def report(self,includeLogs=True):
+        """Return a report on the current/last-finished task, encoded as a list of human-readable strings."""
         global FS
         buf = ['Options:']
         for k in sorted(self.opts.keys()):
-            buf.append('%-40s : %s' % (k,self.opts[k]))
+            buf.append(' %-40s : %s' % (k,self.opts[k]))
         buf.extend(['Statistics:'])
+        for k in self.numStarted:
+            buf.extend([' %-7s summary: %d/%d finished/started' % (k,self.numFinished[k],self.numStarted[k])])
         now = time.time()
         for k in sorted(self.startTime.keys()):
             if k in self.endTime:
-                line = '%-40s : finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k])
+                line = ' %-40s: finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k])
                 if k in self.inputSize: line += ' chars: input %d' % self.inputSize[k]
                 if k in self.outputSize: line += ' output %d' % self.outputSize[k]
                 if k in self.logSize: line += ' log %d' % self.logSize[k]
             else:
-                line = '%40s: running for %.3f sec' % (k,now-self.startTime[k])
+                line = ' %-40s: running for %.3f sec' % (k,now-self.startTime[k])
             buf.append(line)
         if includeLogs:
             buf.extend(['Subprocess Logs:'])
             buf.extend(FS.listFiles("_logs",pretty=True))
         return buf
 
+# a global object to track the current task
 TASK_STATS = TaskStats({'ERROR':'no tasks started yet'})
 
 # prevent multiple tasks from happening at the same time
@@ -209,6 +250,7 @@ TASK_LOCK = threading.Lock()
 def performTask(optdict):
     """Utility that calls mapreduce or maponly, as appropriate, based on
     the options, and logs a bunch of statistics on this."""
+
     TASK_LOCK.acquire()  #since the task stats are global
     try:
         # maintain some statistics for this task in TASKS and the FS
@@ -248,7 +290,6 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
 
     # Set up a place to save the inputs to K reducers - each of which
     # is a buffer bj, which contains lines for shard K,
-
 
     TASK_STATS.start('_init reduce buffer queues')
     reducerQs = []        # task queues to join with later 
@@ -350,20 +391,25 @@ def runReducer(usingGPFS,redPipe,buf,f,outdir):
 def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
     """Thread that takes outputs of a map pipeline, hashes them, and
     sends them in the appropriate reduce queue."""
-    #maps shard index to a key->list defaultdict
-    start = time.time()
+
+    #run the mapper
     output = logCommunication(
         mapPipe, getInput(usingGPFS,indir,f),
         'mapper-from-%s/%s' % (indir,f))
+
     global TASK_STATS
     TASK_STATS.start('shuffling output of mapper from %s/%s' % (indir,f))
+    #buffer[h] will hold the part of this mapper's output that will be
+    #sent to reducer h
     buffers = []
     for h in range(numReduceTasks):
         buffers.append(cStringIO.StringIO())
+    #add each output line to the appropriate buffer
     for line in cStringIO.StringIO(output):
         k = key(line)
-        h = hash(k) % numReduceTasks    # send to reducer buffer h
+        h = hash(k) % numReduceTasks    
         buffers[h].write(line)
+    #queue up the buffer to send to the appropriate reducer
     for h in range(numReduceTasks):    
         if buffers[h]: reducerQs[h].put(buffers[h].getvalue())
     TASK_STATS.end('shuffling output of mapper from %s/%s' % (indir,f))
@@ -386,12 +432,19 @@ def logCommunication(pipe,inputString,pipeTag):
 
     #record start
     TASK_STATS.start(pipeTag)
+    for k in TASK_STATS.numStarted.keys():
+        if pipeTag.startswith(k): 
+            TASK_STATS.numStarted[k] += 1
+
     #the actual work being done: send the input string to the pipe
     #process, execute it, and return stdout and stderr results
     (output,log) = pipe.communicate(input=inputString)    
     pipe.wait()
     #record completion
     TASK_STATS.end(pipeTag)
+    for k in TASK_STATS.numStarted.keys():
+        if pipeTag.startswith(k): 
+            TASK_STATS.numFinished[k] += 1
 
     #save statistics and logs
     TASK_STATS.inputSize[pipeTag] = len(inputString)
@@ -476,6 +529,7 @@ def joinAll(xs,msg):
 # server
 
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+from SocketServer import ThreadingMixIn
 import urlparse
 
 keepRunning = True
@@ -485,51 +539,36 @@ class MRSHandler(BaseHTTPRequestHandler):
     def _sendList(self,items,html):
         """Send a list of items as a viewable file."""
         if not html:
-            self._sendFile("\n".join(items) + "\n")
+            self._sendFile("\n".join(items) + "\n", False)
         else:
             # add a whole bunch of annotations if this is for a browser....
-            def markup(it):
-                if it.startswith(GPFileSystem.FILES_MARKER):
-                    keyword,n,f = it.split()
-                    return it + (' ' * (50-len(f)) + ' ') + '[<a href="/ls?html=1&dir=%s">ls %s</a>]' % (f,f)
-                elif it.startswith(GPFileSystem.CHARS_MARKER):
-                    keyword,n,df = it.split()
-                    d,f = df.split("/")
-                    # since a lot of the file names have been url-quoted, we need to quote them again
-                    # before we let this be a request
-                    f = urllib.quote_plus(f) 
-                    return it + (' ' * (50-len(df)) + ' ') \
-                        + '[<a href="/cat?html=1&dir=%s&file=%s">cat</a>' % (d,f) \
-                        + '|<a href="/cat?html=1&dir=%s&file=%s">head</a>' % (d,f) \
-                        + '|<a href="/cat?html=1&dir=%s&file=%s">tail</a>]' % (d,f)
-                else:
-                    return it
-            self.send_response(200)
-            self.send_header('Content-type','text/html')
-            self.end_headers()            
-            self.wfile.write("<html><head><title>MRS GP Output</title></head>\n")
-            self.wfile.write("<body>\n")
-            self.wfile.write("<hr/>\n")
+            self._sendHtmlHeader()
             self.wfile.write("<pre>\n")
             for it in items:
-                self.wfile.write(markup(it) + "\n")
+                self.wfile.write(self._addMarkup(it) + "\n")
             self.wfile.write("</pre>\n")
-            self.wfile.write("<hr/>\n")
-            self.wfile.write('[<a href="/ls?html=1">List directories</a> | <a href="/report?html=1">Report on last task</a>')
-            self.wfile.write("</body></html>\n")
+            self._sendHtmlFooter()
 
-    def _sendFile(self,text):
-        self.send_response(200)
-        self.send_header('Content-type','text/plain')
-        self.end_headers()
-        self.wfile.write(text)
+    def _sendFile(self,text,html):
+        """Send an entire file."""
+        if not html:
+            self.send_response(200)
+            self.send_header('Content-type','text/plain')
+            self.end_headers()
+            self.wfile.write(text)
+        else:
+            self._sendHtmlHeader()
+            self.wfile.write("<pre>\n")
+            self.wfile.write(text)
+            self.wfile.write("</pre>\n")
+            self._sendHtmlFooter()
     
     # turn off request logging to stderr
     def log_request(self,code=0,size=0):
         pass
 
     def do_GET(self):
-        #print "GET request "+self.path
+        """Handle a request."""
         global keepRunning
         global TASK_STATS
         try:
@@ -539,11 +578,12 @@ class MRSHandler(BaseHTTPRequestHandler):
             #convert the dict of lists to a dict of items, since I
             # don't use multiple values for any key
             requestArgs = dict(map(lambda (key,valueList):(key,valueList[0]), requestArgs.items()))
+            # indicates if I want a browser-ready output, or plain
+            # text
             html = 'html' in requestArgs
-            #print "request:",requestOp,requestArgs
             if requestOp=="/shutdown":
                 keepRunning = False
-                self._sendFile("Shutting down")
+                self._sendFile("Shutting down",html)
             elif requestOp=="/ls" and not 'dir' in requestArgs:
                 self._sendList(FS.listDirs(pretty=True),html)
             elif requestOp=="/ls" and 'dir' in requestArgs:
@@ -552,30 +592,28 @@ class MRSHandler(BaseHTTPRequestHandler):
             elif requestOp=="/getmerge" and 'dir' in requestArgs:
                 d = requestArgs['dir']
                 buf = "".join(map(lambda f:FS.cat(d,f),FS.listFiles(d)))
-                self._sendFile(buf)
+                self._sendFile(buf,html)
             elif requestOp=="/write":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 line = requestArgs['line']
                 FS.write(d,f,line+'\n')
-                self._sendFile("Line '%s' written to %s/%s" % (line,d,f))
+                self._sendFile("Line '%s' written to %s/%s" % (line,d,f), html)
             elif requestOp=="/cat":
-                logging.debug('requestArgs = '+str(requestArgs))
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 content = FS.cat(d,f)
-                logging.debug('content = '+content[:20]+'...')
-                self._sendFile(content)
+                self._sendFile(content,html)
             elif requestOp=="/head":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 n = int(requestArgs.get('n','2048'))
-                self._sendFile(FS.head(d,f,n))
+                self._sendFile(FS.head(d,f,n),html)
             elif requestOp=="/tail":
                 d = requestArgs['dir']
                 f = requestArgs['file']
                 n = int(requestArgs.get('n','2048'))
-                self._sendFile(FS.tail(d,f,n))
+                self._sendFile(FS.tail(d,f,n),html)
             elif requestOp=="/report":
                 self._sendList(TASK_STATS.report(), html)
             elif requestOp=="/task":
@@ -588,16 +626,56 @@ class MRSHandler(BaseHTTPRequestHandler):
                 except Exception:
                     self._sendFile(traceback.format_exc())
             else:
-                self.sendList(["Unknown command '"+requestOp + "' in request '"+self.path+"'"],html)
+                self._sendList(["Unknown command '"+requestOp + "' in request '"+self.path+"'"],html)
         except KeyError:
-                self.sendList(["Illegal request "+self.path],html)
+                self._sendList(["Illegal request "+self.path],html)
   
+    def _sendHtmlHeader(self):
+        self.send_response(200)
+        self.send_header('Content-type','text/html')
+        self.end_headers()            
+        self.wfile.write("<html><head><title>Map-Reduce for GuineaPig</title></head>\n")
+        self.wfile.write("<body>\n")
+        self.wfile.write('Map-Reduce for GuineaPig: see [<a href="http://curtis.ml.cmu.edu/w/courses/index.php/Guinea_Pig">GuineaPig Wiki</a>]')
+        self.wfile.write("<hr/>\n")
+
+    def _sendHtmlFooter(self):
+        self.wfile.write("<hr/>\n")
+        self.wfile.write("[<a href=\"/ls?html=1\">List directories</a> "
+                         "| <a href=\"/ls?html=1&dir=_history\">Task History</a> "
+                         "| See <a href=\"/report?html=1\">Report on last task</a>]")
+        self.wfile.write("</body></html>\n")
+
+    def _addMarkup(self,it):
+        """Add some clickable markup to directory listings."""
+        if it.startswith(GPFileSystem.FILES_MARKER):
+            keyword,n,f = it.split()
+            return it + (' ' * (50-len(f)) + ' ') \
+                + '[<a href="/ls?html=1&dir=%s">listing</a>' % (f) \
+                + '|<a href="/getmerge?&dir=%s">download</a>]' % (f)
+        elif it.startswith(GPFileSystem.CHARS_MARKER):
+            keyword,n,df = it.split()
+            d,f = df.split("/")
+            # since a lot of the file names have been url-quoted, we need to quote them again
+            # before we let this be a request
+            f = urllib.quote_plus(f) 
+            return it + (' ' * (50-len(df)) + ' ') \
+                + '[<a href="/cat?html=1&dir=%s&file=%s">cat</a>' % (d,f) \
+                + '|<a href="/head?dir=%s&file=%s">download</a>' % (d,f) \
+                + '|<a href="/head?html=1&dir=%s&file=%s">head</a>' % (d,f) \
+                + '|<a href="/tail?html=1&dir=%s&file=%s">tail</a>]' % (d,f)
+        else:
+            return it
+
+class ThreadingServer(ThreadingMixIn, HTTPServer):
+    pass
+
 def runServer():
     #allow only access from local machine
     #server_address = ('127.0.0.1', 1969)
     #allow access from anywhere
     server_address = ('0.0.0.0', 1969)    
-    httpd = HTTPServer(server_address, MRSHandler)
+    httpd = ThreadingServer(server_address, MRSHandler)
     startMsg = 'http server started on %s:%d at %s' % (httpd.server_name,1969,time.strftime('%X %x'))
     logging.info(startMsg)
     print startMsg
