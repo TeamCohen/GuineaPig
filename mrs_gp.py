@@ -180,7 +180,7 @@ class TaskStats(object):
                 buf.append('%30s: running for %.3f sec' % (k,now-self.startTime[k]))
         return buf
 
-TASK_STATS = None
+TASK_STATS = TaskStats({'ERROR':'no tasks started yet'})
 
 # prevent multiple tasks from happening at the same time
 TASK_LOCK = threading.Lock()
@@ -476,6 +476,7 @@ class MRSHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         #print "GET request "+self.path
         global keepRunning
+        global TASK_STATS
         try:
             p = urlparse.urlparse(self.path)
             requestOp = p.path
@@ -486,7 +487,6 @@ class MRSHandler(BaseHTTPRequestHandler):
             html = 'html' in requestArgs
             #print "request:",requestOp,requestArgs
             if requestOp=="/shutdown":
-                global keepRunning
                 keepRunning = False
                 self._sendFile("Shutting down")
             elif requestOp=="/ls" and not 'dir' in requestArgs:
@@ -520,12 +520,13 @@ class MRSHandler(BaseHTTPRequestHandler):
                 f = requestArgs['file']
                 n = int(requestArgs.get('n','2048'))
                 self._sendFile(FS.tail(d,f,n))
+            elif requestOp=="/report":
+                self._sendList(TASK_STATS.report(), html)
             elif requestOp=="/task":
                 try:
                     (clientHost,clientPort) = self.client_address
-                    (serverHost,serverPort) = self.server.server_address
-                    if (clientHost!=serverHost):
-                        raise Exception("externally submitted task!")
+                    if (clientHost!='127.0.0.1'):
+                        raise Exception("externally submitted task: from %s" % clientHost)
                     performTask(requestArgs)
                     self._sendList(TASK_STATS.report(), html)
                 except Exception:
@@ -537,11 +538,11 @@ class MRSHandler(BaseHTTPRequestHandler):
   
 def runServer():
     #allow only access from local machine
-    server_address = ('127.0.0.1', 1969)
+    #server_address = ('127.0.0.1', 1969)
     #allow access from anywhere
-    #server_address = ('0.0.0.0', 1969)    
+    server_address = ('', 1969)    
     httpd = HTTPServer(server_address, MRSHandler)
-    print('http server is running on port 1969...')
+    print('http server is running on %s:%d' % (httpd.server_name,1969))
     while keepRunning:
         httpd.handle_request()
 
@@ -583,7 +584,7 @@ def usage():
 
 if __name__ == "__main__":
 
-    argspec = ["serve", "send=", "shutdown", "task", "help", "fs",
+    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report",
                "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
@@ -600,6 +601,8 @@ if __name__ == "__main__":
             sendRequest(optdict['--send'])
         elif "--shutdown" in optdict:
             sendRequest("/shutdown")
+        elif "--report" in optdict:
+            sendRequest("/report")
         elif "--task" in optdict:
             del optdict['--task']
             sendRequest("/task?" + urllib.urlencode(optdict))

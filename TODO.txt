@@ -7,6 +7,7 @@ Branching:
 TODO for mrs_gp.py:
  -- mrs_gp.py: much faster, needs stress testing 
  --- error/task tracking: failed tasks should return failure
+     maybe wrap communicate 
  --- logging
     --- performTask outputs to _task.log/....
     --- mapreduce outputs to _mappers.log/..._reducers.log/... 

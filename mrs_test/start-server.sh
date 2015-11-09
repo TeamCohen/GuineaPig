@@ -1,3 +1,3 @@
-pypy ../mrs_gp.py --serve >& server.log &
+python ../mrs_gp.py --serve >& server.log &
 sleep 1
 

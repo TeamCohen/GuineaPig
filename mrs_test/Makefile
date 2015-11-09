@@ -1,53 +1,120 @@
-#DIR=/mnt/ramdisk/mrs/
-DIR=.
-MRS=pypy ../mrs_gp.py
-K=2
+MRS=python ../mrs_gp.py
+K=3
 
-clean:
-	rm -rf sharded unsharded-copy sharded-copy 
+clean: 
+	rm -rf /tmp/test-copy
 
-tests: unsharded-copy sharded-copy compare-events
+# file-file
 
-unsharded-copy: unsharded/train.txt
-	echo checking a one-process map-only task
-	$(MRS) --input $(DIR)/unsharded --output $(DIR)/unsharded-copy --mapper cat
-	echo these should be the same
-	sum unsharded/* unsharded-copy/*
+copy:
+	bash start-server.sh
+	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
+	$(MRS) --shutdown
+	echo should be the same
+	sum test/* /tmp/test-copy/*
 
-sharded-copy: sharded
-	echo checking a multi-process map-only task
-	$(MRS) --input $(DIR)/sharded --output $(DIR)/sharded-copy --mapper cat
-	echo checking file sizes
-	wc sharded/*
-	wc sharded-copy/* 
+copy2:
+	bash start-server.sh
+	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
+	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
+	$(MRS) --shutdown
+	echo should be the same
+	sum test/* /tmp/test-copy/*
 
-sharded: unsharded/train.txt
-	echo checking a multi-process map-reduce task
-	$(MRS) --input $(DIR)/unsharded --output $(DIR)/sharded --mapper cat --reducer cat --numReduceTasks $(K)
-	echo checking file sizes
-	wc unsharded/* 
-	wc sharded/*
+shard:
+	bash start-server.sh
+	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
+	echo $(MRS) --shutdown
+	echo should have 3 files
+	ls /tmp/test-copy
+	echo should be the same
+	sort test/* | sum
+	sort /tmp/test-copy/* | sum
 
-events: sharded
-	echo checking job of training naive bayes in parallel
-	time $(MRS) --input $(DIR)/sharded --output $(DIR)/events --numReduceTasks $(K) \
+reshard:
+	make -f Makefile.serve shard
+	bash start-server.sh
+	$(MRS) --task --input /tmp/test-copy --output /tmp/test-copy2 --mapper cat --reducer cat --numReduceTasks 2
+	$(MRS) --shutdown
+	echo should have 3 files
+	ls /tmp/test-copy
+	echo should have 2 files
+	ls /tmp/test-copy2
+	echo should be the same
+	sort test/* | sum
+	sort /tmp/test-copy/* | sum
+	sort /tmp/test-copy2/* | sum
+
+# file-memory 
+
+load:
+	bash start-server.sh
+	$(MRS) --task --input test --output gpfs:test-copy --mapper cat
+	$(MRS) --send '/getmerge?dir=test-copy' | tail -n +2 > tmp.txt
+	$(MRS) --shutdown
+	echo should be the same
+	sum test/* tmp.txt
+
+load-shard:
+	bash start-server.sh
+	$(MRS) --task --input test --output gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 3
+	echo should have 3 files
+	$(MRS) --send 'ls?dir=test-copy'
+	$(MRS) --send 'getmerge?dir=test-copy' | tail -n +2 > tmp.txt
+	$(MRS) --shutdown
+	echo should be the same
+	sort test/* | sum
+	sort tmp.txt | sum
+
+roundtrip:
+	bash start-server.sh
+	$(MRS) --task --input test --output gpfs:test-copy --mapper cat 
+	$(MRS) --task --output /tmp/test-copy --input gpfs:test-copy --mapper cat
+	$(MRS) --shutdown
+	echo should be the same
+	sort test/* | sum
+	sort /tmp/test-copy/* | sum
+
+roundtrip-reshard:
+	bash start-server.sh
+	$(MRS) --task --input test --output gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 3
+	$(MRS) --task --output /tmp/test-copy --input gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 2
+	$(MRS) --shutdown
+	echo should be the same
+	sort test/* | sum
+	sort /tmp/test-copy/* | sum
+
+parallel-events.txt: 
+	bash start-server.sh
+	echo sharding to $(K) shards
+	time  $(MRS) --task --input unsharded --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	echo training naive bayes in parallel
+	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) \
 		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
 		--reducer 'python sum-events.py'
+	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' 
+	echo export
+	$(MRS) --send '/getmerge?dir=events' | tail -n +2 > parallel-events.txt
+	$(MRS) --shutdown
 
-tmp: sharded
-	echo checking job of training naive bayes in parallel
-	time $(MRS) --input $(DIR)/sharded --output $(DIR)/tmp --numReduceTasks $(K) \
-		--mapper 'python streamNaiveBayesLearner.py --streamTrain 10' \
-		--reducer 'cat'
+# --streamTrain 100
+# threads      shard	learn
+# <baseline>    n/a	240.50???
+# 1	       	5.65	443.32
+# 5	       	6.18	130.19
+# 10		6.59	103.47
+# 20		8.55	107.96
 
-events.txt: unsharded/train.txt
-	echo == training naive bayes directly
-	cat unsharded/train.txt | python streamNaiveBayesLearner.py --streamTrain 100 \
-	| LC_COLLATE=C sort | python sum-events.py > events.txt
+RAM=/mnt/ramdisk/mrs/
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+SUM='python sum-events.py'
+bigfile-times:
+	echo sharding
+	bash start-server.sh
+	time $(MRS) --task --input $(RAM)/bigfile1 --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	echo learning
+	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
+	$(MRS) --shutdown
 
-compare-events: events.txt events
-	sort events.txt > tmp1
-	sort events/* > tmp2
-	sum tmp1 tmp2
-	rm tmp1 tmp2
-
+bigfile-baseline-time:
+	time `cat /mnt/ramdisk/mrs/bigfile1/test.txt | python streamNaiveBayesLearner.py --streamTrain 100 | sort -k1 | python sum-events.py > /dev/null`
