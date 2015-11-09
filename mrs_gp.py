@@ -86,12 +86,14 @@ import cStringIO
 ##############################################################################
 
 class GPFileSystem(object):
-
+    FILES_MARKER = ' files: '
+    CHARS_MARKER = ' chars: '
     def __init__(self):
         #file names in directory/shards
         self.filesIn = collections.defaultdict(list)
         #content of (dir,file)
         self.linesOf = {}
+
     def rmDir(self,d0):
         d = self._fixDir(d0)
         if d in self.filesIn:
@@ -104,11 +106,21 @@ class GPFileSystem(object):
             self.filesIn[d].append(f)
             self.linesOf[(d,f)] = cStringIO.StringIO()
         self.linesOf[(d,f)].write(line)
-    def listDirs(self):
-        return self.filesIn.keys()
-    def listFiles(self,d0):
+    def listDirs(self,pretty=False):
+        result = self.filesIn.keys()
+        if not pretty: 
+            return result
+        else:
+            def fmtdir(d): return '%s%3d  %s' % (GPFileSystem.FILES_MARKER,len(FS.listFiles(d)),d)
+            return map(fmtdir,result)
+    def listFiles(self,d0,pretty=False):
         d = self._fixDir(d0)
-        return self.filesIn[d]
+        result = self.filesIn[d]
+        if not pretty: 
+            return result
+        else:
+            def fmtfile(f): return '%s%6d  %s/%s' % (GPFileSystem.CHARS_MARKER,len(FS.cat(d,f)),d,f)
+            return map(fmtfile,result)
     def cat(self,d0,f):
         d = self._fixDir(d0)
         return self.linesOf[(d,f)].getvalue()
@@ -168,16 +180,25 @@ class TaskStats(object):
         """End timing something."""
         self.endTime[msg] = time.time()
         logging.info('finished '+msg + ' in %.3f sec' % (self.endTime[msg]-self.startTime[msg]))
-    def report(self):
-        buf = []
+    def report(self,includeLogs=True):
+        global FS
+        buf = ['Options:']
         for k in sorted(self.opts.keys()):
             buf.append('%-40s : %s' % (k,self.opts[k]))
+        buf.extend(['Statistics:'])
         now = time.time()
         for k in sorted(self.startTime.keys()):
             if k in self.endTime:
-                buf.append('%-40s : finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k]))
+                line = '%-40s : finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k])
+                if k in self.inputSize: line += ' chars: input %d' % self.inputSize[k]
+                if k in self.outputSize: line += ' output %d' % self.outputSize[k]
+                if k in self.logSize: line += ' log %d' % self.logSize[k]
             else:
-                buf.append('%30s: running for %.3f sec' % (k,now-self.startTime[k]))
+                line = '%40s: running for %.3f sec' % (k,now-self.startTime[k])
+            buf.append(line)
+        if includeLogs:
+            buf.extend(['Subprocess Logs:'])
+            buf.extend(FS.listFiles("_logs",pretty=True))
         return buf
 
 TASK_STATS = TaskStats({'ERROR':'no tasks started yet'})
@@ -186,14 +207,19 @@ TASK_STATS = TaskStats({'ERROR':'no tasks started yet'})
 TASK_LOCK = threading.Lock()
 
 def performTask(optdict):
-    """Utility that calls mapreduce or maponly, as appropriate, based on the options."""
-    TASK_LOCK.acquire()
+    """Utility that calls mapreduce or maponly, as appropriate, based on
+    the options, and logs a bunch of statistics on this."""
+    TASK_LOCK.acquire()  #since the task stats are global
     try:
-        # maintain some statistics for this task
+        # maintain some statistics for this task in TASKS and the FS
         global TASK_STATS
+        global FS
         TASK_STATS = TaskStats(optdict)
+        
         TASK_STATS.start('__top level task')
+        FS.rmDir("gpfs:_logs")
 
+        #start parsing options and performing actions...
         indir = optdict['--input']
         outdir = optdict['--output']
         if '--reducer' in optdict:
@@ -207,6 +233,7 @@ def performTask(optdict):
             mapper = optdict.get('--mapper','cat')
             maponly(indir,outdir,mapper)        
         TASK_STATS.end('__top level task')
+        FS.write("_history",time.strftime("task-%Y.%m.%H.%M.%S"),"\n".join(TASK_STATS.report(includeLogs=False)))
 
     finally:
         TASK_LOCK.release()
@@ -246,7 +273,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         # inside a thread - this led to bugs with the reducer
         # processes.  This is possibly a python library bug:
         # http://bugs.python.org/issue1404925
-        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         si = threading.Thread(target=shuffleMapOutputs, args=(usingGPFS,numReduceTasks,mapPipeI,indir,fi,reducerQs))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
@@ -267,7 +294,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     TASK_STATS.start('_init reducers')
     reducers = []
     for j in range(numReduceTasks):    
-        reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         # thread to feed data into the reducer process
         uj = threading.Thread(target=runReducer, 
                               args=(usingGPFS,reducePipeJ,reducerBuffers[j],("part%05d" % j),outdir))
@@ -293,7 +320,7 @@ def maponly(indir,outdir,mapper):
     TASK_STATS.start('_init mappers')
     mapThreads = []
     for fi in infiles:
-        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
+        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
         mapThreadI.start()
         mapThreads.append(mapThreadI)
@@ -311,13 +338,13 @@ def runMapper(usingGPFS,mapPipe,indir,f,outdir):
     inputString=getInput(usingGPFS,indir,f)
     output = logCommunication(
         mapPipe,inputString,
-        'mapper from %s/%s to %s/%s' % (indir,f,outdir,f))
+        'mapper-from-%s/%s to %s/%s' % (indir,f,outdir,f))
     putOutput(usingGPFS,outdir,f,output)
 
 def runReducer(usingGPFS,redPipe,buf,f,outdir):
     output = logCommunication(
         redPipe,buf.getvalue(),
-        'reducer to %s/%s' % (outdir,f))
+        'reducer-to-%s/%s' % (outdir,f))
     putOutput(usingGPFS,outdir,f,output)
 
 def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
@@ -327,7 +354,7 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
     start = time.time()
     output = logCommunication(
         mapPipe, getInput(usingGPFS,indir,f),
-        'mapper from %s/%s to reducers' % (indir,f))
+        'mapper-from-%s/%s' % (indir,f))
     global TASK_STATS
     TASK_STATS.start('shuffling output of mapper from %s/%s' % (indir,f))
     buffers = []
@@ -353,13 +380,34 @@ def acceptReduceInputs(reducerQ,reducerBuf):
 #
 
 def logCommunication(pipe,inputString,pipeTag):
+    """Wraps a pipe.communicate() call with a bunch of logging chores."""
     global TASK_STATS
+    global FS
+
+    #record start
     TASK_STATS.start(pipeTag)
-    (output,logs) = pipe.communicate(input=inputString)    
-    if pipe.returncode:
-        logging.warn("%s failed with return code %d" % (pipeTag,pipe.returncode))
+    #the actual work being done: send the input string to the pipe
+    #process, execute it, and return stdout and stderr results
+    (output,log) = pipe.communicate(input=inputString)    
     pipe.wait()
+    #record completion
     TASK_STATS.end(pipeTag)
+
+    #save statistics and logs
+    TASK_STATS.inputSize[pipeTag] = len(inputString)
+    TASK_STATS.outputSize[pipeTag] = len(output)
+    if not log: log=''
+    TASK_STATS.logSize[pipeTag] = len(log)
+    FS.write("gpfs:_logs",urllib.quote_plus(pipeTag),log)
+    TASK_STATS.logSize[pipeTag] = 0
+
+    #could also have been an error starting up the process
+    if pipe.returncode:
+        msg = "%s failed to start - return code %d" % (pipeTag,pipe.returncode)
+        logging.warn(msg)
+        FS.write("gpfs:_logs",pipeTag,msg)
+
+    #finally return stdout from pipe process
     return output
 
 def setupFiles(indir,outdir):
@@ -435,20 +483,27 @@ keepRunning = True
 class MRSHandler(BaseHTTPRequestHandler):
     
     def _sendList(self,items,html):
+        """Send a list of items as a viewable file."""
         if not html:
             self._sendFile("\n".join(items) + "\n")
         else:
+            # add a whole bunch of annotations if this is for a browser....
             def markup(it):
-                if it.startswith(" files:"):
+                if it.startswith(GPFileSystem.FILES_MARKER):
                     keyword,n,f = it.split()
-                    return it + (' ' * (30-len(f))) + '[<a href="/ls?html=1&dir=%s">ls %s</a>]' % (f,f)
-                elif it.startswith(" chars:"):
+                    return it + (' ' * (50-len(f)) + ' ') + '[<a href="/ls?html=1&dir=%s">ls %s</a>]' % (f,f)
+                elif it.startswith(GPFileSystem.CHARS_MARKER):
                     keyword,n,df = it.split()
                     d,f = df.split("/")
-                    return it + (' ' * (30-len(df))) \
+                    # since a lot of the file names have been url-quoted, we need to quote them again
+                    # before we let this be a request
+                    f = urllib.quote_plus(f) 
+                    return it + (' ' * (50-len(df)) + ' ') \
                         + '[<a href="/cat?html=1&dir=%s&file=%s">cat</a>' % (d,f) \
                         + '|<a href="/cat?html=1&dir=%s&file=%s">head</a>' % (d,f) \
                         + '|<a href="/cat?html=1&dir=%s&file=%s">tail</a>]' % (d,f)
+                else:
+                    return it
             self.send_response(200)
             self.send_header('Content-type','text/html')
             self.end_headers()            
@@ -460,7 +515,7 @@ class MRSHandler(BaseHTTPRequestHandler):
                 self.wfile.write(markup(it) + "\n")
             self.wfile.write("</pre>\n")
             self.wfile.write("<hr/>\n")
-            self.wfile.write('<a href="/ls?html=1">List top level</a>')
+            self.wfile.write('[<a href="/ls?html=1">List directories</a> | <a href="/report?html=1">Report on last task</a>')
             self.wfile.write("</body></html>\n")
 
     def _sendFile(self,text):
@@ -469,7 +524,7 @@ class MRSHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(text)
     
-    # turn off request logging
+    # turn off request logging to stderr
     def log_request(self,code=0,size=0):
         pass
 
@@ -490,12 +545,10 @@ class MRSHandler(BaseHTTPRequestHandler):
                 keepRunning = False
                 self._sendFile("Shutting down")
             elif requestOp=="/ls" and not 'dir' in requestArgs:
-                def fmtdir(d): return ' files: %3d  %s' % (len(FS.listFiles(d)),d)
-                self._sendList(map(fmtdir, FS.listDirs()),html)
+                self._sendList(FS.listDirs(pretty=True),html)
             elif requestOp=="/ls" and 'dir' in requestArgs:
                 d = requestArgs['dir']
-                def fmtfile(f): return ' chars: %6d  %s/%s' % (len(FS.cat(d,f)),d,f)
-                self._sendList(map(fmtfile,FS.listFiles(d)),html)
+                self._sendList(FS.listFiles(d,pretty=True),html)
             elif requestOp=="/getmerge" and 'dir' in requestArgs:
                 d = requestArgs['dir']
                 buf = "".join(map(lambda f:FS.cat(d,f),FS.listFiles(d)))
@@ -507,9 +560,12 @@ class MRSHandler(BaseHTTPRequestHandler):
                 FS.write(d,f,line+'\n')
                 self._sendFile("Line '%s' written to %s/%s" % (line,d,f))
             elif requestOp=="/cat":
+                logging.debug('requestArgs = '+str(requestArgs))
                 d = requestArgs['dir']
                 f = requestArgs['file']
-                self._sendFile(FS.cat(d,f))
+                content = FS.cat(d,f)
+                logging.debug('content = '+content[:20]+'...')
+                self._sendFile(content)
             elif requestOp=="/head":
                 d = requestArgs['dir']
                 f = requestArgs['file']
@@ -532,19 +588,22 @@ class MRSHandler(BaseHTTPRequestHandler):
                 except Exception:
                     self._sendFile(traceback.format_exc())
             else:
-                self.send_error(400,"Unknown command '"+requestOp + "' in request '"+self.path+"'")
+                self.sendList(["Unknown command '"+requestOp + "' in request '"+self.path+"'"],html)
         except KeyError:
-                self.send_error(400,"Illegal request "+self.path)
+                self.sendList(["Illegal request "+self.path],html)
   
 def runServer():
     #allow only access from local machine
     #server_address = ('127.0.0.1', 1969)
     #allow access from anywhere
-    server_address = ('', 1969)    
+    server_address = ('0.0.0.0', 1969)    
     httpd = HTTPServer(server_address, MRSHandler)
-    print('http server is running on %s:%d' % (httpd.server_name,1969))
+    startMsg = 'http server started on %s:%d at %s' % (httpd.server_name,1969,time.strftime('%X %x'))
+    logging.info(startMsg)
+    print startMsg
     while keepRunning:
         httpd.handle_request()
+    logging.info(startMsg + ' has been shut down')
 
 # client
 
@@ -593,7 +652,6 @@ if __name__ == "__main__":
     if "--serve" in optdict:
         # log server to a file, since it runs in the background...
         logging.basicConfig(filename="server.log",level=logging.INFO)
-        logging.info("server started....")
         runServer()
     else:
         logging.basicConfig(level=logging.INFO)        
@@ -614,7 +672,7 @@ if __name__ == "__main__":
             else:
                 request = "/"+args[0]+"?plain"
                 if len(args)>1: request += "&dir="+args[1]
-                if len(args)>2: request += "&file="+args[2]
+                if len(args)>2: request += "&file="+urllib.quote_plus(args[2])
                 if len(args)>3 and args[0]=="write": request += "&line="+args[3]
                 elif len(args)>3: request += "&n="+args[3]
                 #print "request: "+request

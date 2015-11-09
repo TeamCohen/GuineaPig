@@ -1,8 +1,9 @@
 MRS=python ../mrs_gp.py
 K=3
 
+#
 clean: 
-	rm -rf /tmp/test-copy
+	rm -rf /tmp/test-copy parallel-events.txt
 
 # file-file
 
@@ -24,12 +25,23 @@ copy2:
 shard:
 	bash start-server.sh
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
-	echo $(MRS) --shutdown
+	$(MRS) --shutdown
 	echo should have 3 files
 	ls /tmp/test-copy
 	echo should be the same
 	sort test/* | sum
 	sort /tmp/test-copy/* | sum
+
+up:
+	bash start-server.sh
+
+down:
+	$(MRS) --shutdown
+
+shard-fixed-server:
+	echo bash start-server.sh
+	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
+	echo echo $(MRS) --shutdown
 
 reshard:
 	make -f Makefile.serve shard
@@ -50,7 +62,7 @@ reshard:
 load:
 	bash start-server.sh
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat
-	$(MRS) --send '/getmerge?dir=test-copy' | tail -n +2 > tmp.txt
+	$(MRS) --send '/getmerge?dir=test-copy' > tmp.txt
 	$(MRS) --shutdown
 	echo should be the same
 	sum test/* tmp.txt
@@ -59,8 +71,8 @@ load-shard:
 	bash start-server.sh
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 3
 	echo should have 3 files
-	$(MRS) --send 'ls?dir=test-copy'
-	$(MRS) --send 'getmerge?dir=test-copy' | tail -n +2 > tmp.txt
+	$(MRS) --send '/ls?dir=test-copy'
+	$(MRS) --send '/getmerge?dir=test-copy' > tmp.txt
 	$(MRS) --shutdown
 	echo should be the same
 	sort test/* | sum
@@ -95,7 +107,7 @@ parallel-events.txt:
 	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' 
 	echo export
 	$(MRS) --send '/getmerge?dir=events' | tail -n +2 > parallel-events.txt
-	$(MRS) --shutdown
+	echo $(MRS) --shutdown
 
 # --streamTrain 100
 # threads      shard	learn

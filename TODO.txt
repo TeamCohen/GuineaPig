@@ -6,21 +6,12 @@ Branching:
 
 TODO for mrs_gp.py:
  -- mrs_gp.py: much faster, needs stress testing 
- --- error/task tracking: failed tasks should return failure
-     maybe wrap communicate 
- --- logging
-    --- performTask outputs to _task.log/....
-    --- mapreduce outputs to _mappers.log/..._reducers.log/... 
- --- serve basic task stats on demand for SINGLE currently running task (lock these)
-  -- input, output, mapper, reducer
-  -- elapsed time on current task 
-  -- map jobs started, finished, total/avg inputs, total/avg outputs
-  -- reduce/sort jobs started, finished, total/avg inputs, total/avg outputs
+ -- serve basic task stats on demand for SINGLE currently running task (lock these)
+ -- http://stackoverflow.com/questions/14088294/multithreaded-web-server-in-python
  --- filesystem: 
    -- append ".gp" by default?
    -- check if input file is a directory or not
    -- write to a file, not directory, if --numReduceTasks = 1
- --- security: check for loopbacks for /task only
  --- add /favicon.ico handler
 
 ROBUSTNESS/ERRORS/DOCS:
