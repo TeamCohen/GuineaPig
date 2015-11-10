@@ -127,4 +127,5 @@ bigfile-times:
 	echo $(MRS) --shutdown
 
 bigfile-baseline-time:
-	time `cat /mnt/ramdisk/mrs/bigfile1/test.txt | python streamNaiveBayesLearner.py --streamTrain 100 | sort -k1 | python sum-events.py > /dev/null`
+	time sh baseline.sh
+
