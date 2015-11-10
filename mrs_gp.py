@@ -76,6 +76,13 @@ import cStringIO
 #
 ##############################################################################
 
+# utility to format large file sizes readably
+
+def fmtchars(n):
+    """"Format a large number of characters, e.g., "432,424,131 (423.1M)" """
+    mb = n/(1024*1024.0)
+    return "%d(%.1fM)" % (n,mb)
+
 ##############################################################################
 #
 # shared "file system"
@@ -97,15 +104,16 @@ class GPFileSystem(object):
     def __init__(self):
         #file names in directory/shards
         self.filesIn = collections.defaultdict(list)
-        #content of (dir,file)
-        self.linesOf = {}
+        #content and size of dir/file - indexed by (dir,file)
+        self.contentOf = {}
+        self.sizeOf = {}
 
     def rmDir(self,d0):
         """Clear a directory and all files below it."""
         d = self._fixDir(d0)
         if d in self.filesIn:
             for f in self.filesIn[d]:
-                del self.linesOf[(d,f)]
+                del self.contentOf[(d,f)]
             del self.filesIn[d]
 
     def write(self,d0,f,line):
@@ -113,8 +121,10 @@ class GPFileSystem(object):
         d = self._fixDir(d0)
         if not f in self.filesIn[d]:
             self.filesIn[d].append(f)
-            self.linesOf[(d,f)] = cStringIO.StringIO()
-        self.linesOf[(d,f)].write(line)
+            self.contentOf[(d,f)] = cStringIO.StringIO()
+            self.sizeOf[(d,f)] = 0
+        self.contentOf[(d,f)].write(line)
+        self.sizeOf[(d,f)] += len(line)
 
     def listDirs(self,pretty=False):
         """Return a list of names of directories in the file system.  If
@@ -138,31 +148,35 @@ class GPFileSystem(object):
         if not pretty: 
             return result
         else:
-            def fmtfile(f): return '%s%6d  %s/%s' % (GPFileSystem.CHARS_MARKER,self.size(d,f),d,f)
+            def fmtfile(f): return '%s%s  %s/%s' % (GPFileSystem.CHARS_MARKER,fmtchars(self.size(d,f)),d,f)
             return map(fmtfile,result)
 
     def cat(self,d0,f):
         """Return the contents of a file."""
         d = self._fixDir(d0)
-        return self.linesOf[(d,f)].getvalue()
+        return self.contentOf[(d,f)].getvalue()
 
     def size(self,d0,f):
         """Return the size of a file."""
         d = self._fixDir(d0)
-        return len(self.linesOf[(d,f)].getvalue())
+        return self.sizeOf[(d,f)]
+
+    def totalSize(self):
+        """Return the size of a file."""
+        return sum(self.sizeOf.values())
 
     def head(self,d0,f,n):
         """Return the first n characters of a file."""
         d = self._fixDir(d0)
-        return self.linesOf[(d,f)].getvalue()[:n]
+        return self.contentOf[(d,f)].getvalue()[:n]
 
     def tail(self,d0,f,n):
         """Return the last n characters of a file."""
         d = self._fixDir(d0)
-        return self.linesOf[(d,f)].getvalue()[-n:]
+        return self.contentOf[(d,f)].getvalue()[-n:]
 
     def __str__(self):
-        return "FS("+str(self.filesIn)+";"+str(self.linesOf)+")"
+        return "FS("+str(self.filesIn)+";"+str(self.contentOf)+")"
 
     def _fixDir(self,d):
         """Strip the prefix gpfs: if it is present."""
@@ -204,8 +218,8 @@ class TaskStats(object):
         self.inputSize = {}
         self.outputSize = {}
         self.logSize = {}
-        self.numStarted = {'mapper':0, 'reducer':0}
-        self.numFinished = {'mapper':0, 'reducer':0}
+        self.numStarted = {'mapper':0, 'reducer':0, 'shuffle':0}
+        self.numFinished = {'mapper':0, 'reducer':0, 'shuffle':0}
 
     def start(self,msg):
         """Start timing something."""
@@ -224,17 +238,23 @@ class TaskStats(object):
         for k in sorted(self.opts.keys()):
             buf.append(' %-40s : %s' % (k,self.opts[k]))
         buf.extend(['Statistics:'])
-        for k in self.numStarted:
-            buf.extend([' %-7s summary: %d/%d finished/started' % (k,self.numFinished[k],self.numStarted[k])])
+        for k in sorted(self.numStarted.keys()):
+            s = self.numStarted[k]
+            f = self.numFinished[k]
+            progressBar = '[*]'
+            if s>0:
+                progressBar = "progress [" + ("#"*f) + ("."*(s-f))+"]"
+            buf.extend([' %-7s summary: %d/%d finished/started %s' % (k,self.numFinished[k],self.numStarted[k],progressBar)])
         now = time.time()
         for k in sorted(self.startTime.keys()):
             if k in self.endTime:
                 line = ' %-40s: finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k])
-                if k in self.inputSize: line += ' chars: input %d' % self.inputSize[k]
-                if k in self.outputSize: line += ' output %d' % self.outputSize[k]
+                if k in self.inputSize: line += ' chars: input %s' % fmtchars(self.inputSize[k])
+                if k in self.outputSize: line += ' output %s' % fmtchars(self.outputSize[k])
                 if k in self.logSize: line += ' log %d' % self.logSize[k]
             else:
                 line = ' %-40s: running for %.3f sec' % (k,now-self.startTime[k])
+                if k in self.inputSize: line += ' input %s' % fmtchars(self.inputSize[k])
             buf.append(line)
         if includeLogs:
             buf.extend(['Subprocess Logs:'])
@@ -398,9 +418,10 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
         'mapper-from-%s/%s' % (indir,f))
 
     global TASK_STATS
-    TASK_STATS.start('shuffling output of mapper from %s/%s' % (indir,f))
+    TASK_STATS.start('shuffle from %s/%s' % (indir,f))
     #buffer[h] will hold the part of this mapper's output that will be
     #sent to reducer h
+    TASK_STATS.numStarted['shuffle'] += 1
     buffers = []
     for h in range(numReduceTasks):
         buffers.append(cStringIO.StringIO())
@@ -412,7 +433,8 @@ def shuffleMapOutputs(usingGPFS,numReduceTasks,mapPipe,indir,f,reducerQs):
     #queue up the buffer to send to the appropriate reducer
     for h in range(numReduceTasks):    
         if buffers[h]: reducerQs[h].put(buffers[h].getvalue())
-    TASK_STATS.end('shuffling output of mapper from %s/%s' % (indir,f))
+    TASK_STATS.numFinished['shuffle'] += 1
+    TASK_STATS.end('shuffle from %s/%s' % (indir,f))
 
 def acceptReduceInputs(reducerQ,reducerBuf):
     """Daemon thread that monitors a queue of items to add to a reducer
@@ -438,6 +460,7 @@ def logCommunication(pipe,inputString,pipeTag):
 
     #the actual work being done: send the input string to the pipe
     #process, execute it, and return stdout and stderr results
+    TASK_STATS.inputSize[pipeTag] = len(inputString)
     (output,log) = pipe.communicate(input=inputString)    
     pipe.wait()
     #record completion
@@ -447,11 +470,10 @@ def logCommunication(pipe,inputString,pipeTag):
             TASK_STATS.numFinished[k] += 1
 
     #save statistics and logs
-    TASK_STATS.inputSize[pipeTag] = len(inputString)
     TASK_STATS.outputSize[pipeTag] = len(output)
     if not log: log=''
     TASK_STATS.logSize[pipeTag] = len(log)
-    FS.write("gpfs:_logs",urllib.quote_plus(pipeTag),log)
+    FS.write("gpfs:_logs",pipeTag,log)
     TASK_STATS.logSize[pipeTag] = 0
 
     #could also have been an error starting up the process
@@ -583,7 +605,7 @@ class MRSHandler(BaseHTTPRequestHandler):
             html = 'html' in requestArgs
             if requestOp=="/shutdown":
                 keepRunning = False
-                self._sendFile("Shutting down",html)
+                self._sendFile("Shutting down...\n",html)
             elif requestOp=="/ls" and not 'dir' in requestArgs:
                 self._sendList(FS.listDirs(pretty=True),html)
             elif requestOp=="/ls" and 'dir' in requestArgs:
@@ -616,6 +638,8 @@ class MRSHandler(BaseHTTPRequestHandler):
                 self._sendFile(FS.tail(d,f,n),html)
             elif requestOp=="/report":
                 self._sendList(TASK_STATS.report(), html)
+            elif requestOp=="/":
+                self._sendFile("Try browsing http://%s:%d/ls?html=1" % (self.server.server_name,1969),html)
             elif requestOp=="/task":
                 try:
                     (clientHost,clientPort) = self.client_address
@@ -624,7 +648,7 @@ class MRSHandler(BaseHTTPRequestHandler):
                     performTask(requestArgs)
                     self._sendList(TASK_STATS.report(), html)
                 except Exception:
-                    self._sendFile(traceback.format_exc())
+                    self._sendFile(traceback.format_exc(),html)
             else:
                 self._sendList(["Unknown command '"+requestOp + "' in request '"+self.path+"'"],html)
         except KeyError:
@@ -644,10 +668,18 @@ class MRSHandler(BaseHTTPRequestHandler):
         self.wfile.write("[<a href=\"/ls?html=1\">List directories</a> "
                          "| <a href=\"/ls?html=1&dir=_history\">Task History</a> "
                          "| See <a href=\"/report?html=1\">Report on last task</a>]")
+        self.wfile.write(" File system size: %s" % fmtchars(FS.totalSize()))
         self.wfile.write("</body></html>\n")
 
-    def _addMarkup(self,it):
+    def _addMarkup(self,it,colors=False):
         """Add some clickable markup to directory listings."""
+        def hasStatus(it, stat):
+            return it.find(": "+stat+" ")>=0
+        def colorizeStatus(it, stat, color):
+            lo = it.find(": "+stat+" ") + len(": ")
+            hi = lo+len(stat)
+            colorized = '<font color="%s">%s</font>' % (color,stat)
+            return it[:lo] + colorized + it[hi:]
         if it.startswith(GPFileSystem.FILES_MARKER):
             keyword,n,f = it.split()
             return it + (' ' * (50-len(f)) + ' ') \
@@ -655,15 +687,18 @@ class MRSHandler(BaseHTTPRequestHandler):
                 + '|<a href="/getmerge?&dir=%s">download</a>]' % (f)
         elif it.startswith(GPFileSystem.CHARS_MARKER):
             keyword,n,df = it.split()
-            d,f = df.split("/")
-            # since a lot of the file names have been url-quoted, we need to quote them again
-            # before we let this be a request
-            f = urllib.quote_plus(f) 
+            splitPoint = df.find("/")
+            d = df[:splitPoint]
+            f = df[splitPoint+1:]
             return it + (' ' * (50-len(df)) + ' ') \
                 + '[<a href="/cat?html=1&dir=%s&file=%s">cat</a>' % (d,f) \
                 + '|<a href="/head?dir=%s&file=%s">download</a>' % (d,f) \
                 + '|<a href="/head?html=1&dir=%s&file=%s">head</a>' % (d,f) \
                 + '|<a href="/tail?html=1&dir=%s&file=%s">tail</a>]' % (d,f)
+        elif hasStatus(it,"running"):
+            return colorizeStatus(it, "running", "red")
+        elif hasStatus(it,"finished"):
+            return colorizeStatus(it, "finished", "green")
         else:
             return it
 
@@ -676,7 +711,7 @@ def runServer():
     #allow access from anywhere
     server_address = ('0.0.0.0', 1969)    
     httpd = ThreadingServer(server_address, MRSHandler)
-    startMsg = 'http server started on %s:%d at %s' % (httpd.server_name,1969,time.strftime('%X %x'))
+    startMsg = 'http server started on http://%s:%d/ls&html=1 at %s' % (httpd.server_name,1969,time.strftime('%X %x'))
     logging.info(startMsg)
     print startMsg
     while keepRunning:
@@ -687,18 +722,27 @@ def runServer():
 
 import httplib
  
-def sendRequest(command):
+def sendRequest(command,quiet=False,timeout=None):
     http_server = "127.0.0.1:1969"
-    conn = httplib.HTTPConnection(http_server)
+    conn = httplib.HTTPConnection(http_server,timeout=timeout)
     conn.request("GET", command)
     response = conn.getresponse()
     if response.status==200:
         data_received = response.read()
         conn.close()
-        print data_received,
+        if not quiet:
+            print data_received,
     else:
         conn.close()        
         raise Exception('%d %s' % (response.status,response.reason))
+
+def serverIsResponsive():
+    try:
+        sendRequest("/ls",quiet=True,timeout=1)
+        return True
+    except Exception as e:
+        return False
+    
 
 ##############################################################################
 # main
@@ -707,21 +751,19 @@ def sendRequest(command):
 def usage():
     print "usage: --serve: start server"
     print "usage: --shutdown: shutdown"
+    print "usage: --report: print status of running (or last completed) task"
     print "usage: --fs ... "
-    print "  where commands are: ls, ls DIR, write DIR FILE LINE, cat DIR FILE, getmerge DIR, head DIR FILE N, tail  DIR FILE N",
-    print "usage: --send XXXX: simulate browser request http://server:port/XXXX and print response page"
-    print "  where requests are ls, ls?dir=XXX, write?dir=XXX&file=YYY&line=ZZZ, cat?dir=XXX&file=YYY,"
-    print "                     getmerge?dir=XXX, head?dir=XXX&file=YYY&n=NNN, tail?dir=XXX&file=YYY&n=NNN,"
-    print "                     shutdown -- and option 'html' means html output"
-    print "  this is mainly for testing"
-    print "usage: --task  --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]: map-only task"
+    print "  where commands are: ls, ls DIR, write DIR FILE LINE, cat DIR FILE, getmerge DIR, head DIR FILE N, tail DIR FILE N"
+    print "usage: --task --input DIR1 --output DIR2 --mapper [SHELL_COMMAND]: map-only task"
     print "       --task --input DIR1 --output DIR2 --mapper [SHELL_COMMAND] --reducer [SHELL_COMMAND] --numReduceTasks [K]: map-reduce task"
     print "  where directories DIRi are local file directories OR gpfs:XXX"
-    print "  same options w/o --task will run the commands locally, not on the server"
+    print "  same options w/o --task will run the commands locally, not on the server, which means gpfs:locations are not accessible"
+    print "usage: --probe: say if the server is running or down"
+    print "usage: --send XXXX: simulate browser request http://server:port/XXXX and print response page"
 
 if __name__ == "__main__":
 
-    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report",
+    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report", "probe",
                "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "joinInputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
@@ -737,6 +779,12 @@ if __name__ == "__main__":
             sendRequest(optdict['--send'])
         elif "--shutdown" in optdict:
             sendRequest("/shutdown")
+            while serverIsResponsive():
+                print "waiting for shutdown..."
+                time.sleep(1)
+            print "shutdown complete."
+        elif "--probe" in optdict:
+            print "server is",("running" if serverIsResponsive() else "down")
         elif "--report" in optdict:
             sendRequest("/report")
         elif "--task" in optdict:

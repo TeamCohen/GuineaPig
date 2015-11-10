@@ -7,7 +7,8 @@ Branching:
 TODO for mrs_gp.py:
  -- mrs_gp.py: much faster, but needs stress testing and other testing....
  --- multiple map inputs, for joins
- --- reporting: FS memory usage? subprocess memory/io status? 
+ --- port option
+ --- reporting: subprocess memory/io status? 
  --- buggyness - escaping filenames awkward
  --- filesystem: 
    -- append ".gp" by default?

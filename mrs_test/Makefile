@@ -1,5 +1,5 @@
 MRS=pypy ../mrs_gp.py
-K=10
+K=5
 
 #
 clean: 
@@ -33,7 +33,7 @@ shard:
 	sort /tmp/test-copy/* | sum
 
 up:
-	bash start-server.sh
+	$(MRS) --serve 
 
 down:
 	$(MRS) --shutdown
