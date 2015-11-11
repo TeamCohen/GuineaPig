@@ -5,17 +5,19 @@ Branching:
  | | | mrs_serve_opt???
 
 TODO for mrs_gp.py:
- -- test with gpig
- -- mrs_gp.py: much faster, but needs stress testing and other testing....
- --- multiple map inputs, for joins
- --- port option
+ -- server timeout, for security, in case I leave it running...?
+ -- restrict opened files to a subdirectory - "./" + foo 
+ -- add an 'abort task' method for server...? or maybe kill client thread?
+ -- test with gpig, test on processes with errors, ....
+ -- os.times() - can this show children's time/CPU pct so I can see actual load?
+ -- optimize: can reducerQ write directly to reduce processes, rather than 
+    buffering their inputs? can we write incrementally to/from mappers?
+    would either help much? the mappers seem to start pretty quick,
+    and the reducer will need to buffer up data in the sort....
+ --- multiple map inputs, for joins --inputs dir1,dir2,...
+ --- --port option
  --- reporting: subprocess io progress? pid status?  
- --- buggyness - check escaping filesnames
- --- filesystem: 
-   -- append ".gp" by default? NO, let Guineapig do that
-   -- check if input file is a directory or not
-   -- write to a file, not directory, if --numReduceTasks = 1
- --- document!
+ --- check if input file is a directory or not, and write to a file, not directory, if --numReduceTasks = 1
 
 ROBUSTNESS/ERRORS/DOCS:
  - writeup smallvoc-tfidf.py as an example

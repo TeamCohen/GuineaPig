@@ -36,8 +36,6 @@ import cStringIO
 #  1) Start a server:
 #
 #  pypy mrs_gp.py --serve   #won't return till you shut it down
-#                           #so you might prefer:
-#                           # pypy mrs_gp.py --serve >& server.log &
 #
 #  2) Run some map-reduce commands.  These are submitted to the
 #  server process and run there.
@@ -49,13 +47,13 @@ import cStringIO
 #  and reducer use the same API, but the directories are not HDFS
 #  locations, just some directory on you local FS.
 #
-#  Reducers are optional, if they are not present it will be map-only
-#  task.
+#  Reducers are optional, if they are not present it will be a
+#  map-only task.
 #
-#  DIR also "GPFileSystem" directory, specified by the prefix gpfs:
-#  These are NOT hierarchical and are just stored in memory by the
-#  server.  The files in a directory are always shards of a map-reduce
-#  computation.
+#  DIR could also be "GPFileSystem" directory, specified by the prefix
+#  gpfs: These are NOT hierarchical and are just stored in memory by
+#  the server.  The files in a directory are always shards of a
+#  map-reduce computation.
 #  
 #  If you want to examine the gpfs: files, you can use a browser on
 #  http://localhost:1969/XXX where XXX is a cgi-style query.  For
@@ -72,14 +70,14 @@ import cStringIO
 #
 #  pypy mrs_gp.py --shutdown
 #
-# This seems a bit buggy with multi-threading. 
 #
 ##############################################################################
 
 # utility to format large file sizes readably
 
 def fmtchars(n):
-    """"Format a large number of characters, e.g., "432,424,131 (423.1M)" """
+    """"Format a large number of characters by also including the
+    equivalent size in megabytes."""
     mb = n/(1024*1024.0)
     return "%d(%.1fM)" % (n,mb)
 
@@ -474,7 +472,6 @@ def logCommunication(pipe,inputString,pipeTag):
     if not log: log=''
     TASK_STATS.logSize[pipeTag] = len(log)
     FS.write("gpfs:_logs",pipeTag,log)
-    TASK_STATS.logSize[pipeTag] = 0
 
     #could also have been an error starting up the process
     if pipe.returncode:

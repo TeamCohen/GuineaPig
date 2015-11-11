@@ -1,5 +1,5 @@
 MRS=pypy ../mrs_gp.py
-K=5
+K=10
 
 #
 clean: 
@@ -118,14 +118,21 @@ parallel-events.txt:
 RAM=/mnt/ramdisk/mrs/
 NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
 SUM='python sum-events.py'
+BIG=bigfile2
+
 bigfile-times:
 	echo sharding
 	echo bash start-server.sh
-	time $(MRS) --task --input $(RAM)/bigfile1 --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	time $(MRS) --task --input $(RAM)/$(BIG) --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
 	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
 	echo $(MRS) --shutdown
 
+bigfile-times-ram:
+	echo sharding
+	time $(MRS) --input $(RAM)/$(BIG) --output $(RAM)/sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	echo learning
+	time $(MRS) --input $(RAM)/sharded --output $(RAM)/events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
+
 bigfile-baseline-time:
 	time sh baseline.sh
-
