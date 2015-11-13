@@ -1,4 +1,4 @@
-MRS=pypy ../mrs_gp.py
+MRS=pypy ../mrs_gp_v2.py
 K=10
 
 #
@@ -118,7 +118,8 @@ parallel-events.txt:
 RAM=/mnt/ramdisk/mrs/
 NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
 SUM='python sum-events.py'
-BIG=bigfile2
+BIG=bigfile1  #100M
+#BIG=bigfile2 #1G
 
 bigfile-times:
 	echo sharding
