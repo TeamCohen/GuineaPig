@@ -13,6 +13,9 @@ import time
 import traceback
 import cStringIO
 
+# status: seems ok with new threading scheme, needs some stress testing and better logging
+# TODO error output
+
 ##############################################################################
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
 # multi-threading map-reduce, to be used with inputs/outputs which are
@@ -216,16 +219,18 @@ class TaskStats(object):
         self.inputSize = {}
         self.outputSize = {}
         self.logSize = {}
-        self.numStarted = {'mapper':0, 'reducer':0, 'shuffle':0}
-        self.numFinished = {'mapper':0, 'reducer':0, 'shuffle':0}
+        self.numStarted =  {'mapper':0, 'reducer':0, 'shuffler':0}
+        self.numFinished = {'mapper':0, 'reducer':0, 'shuffler':0}
 
     def start(self,msg):
         """Start timing something."""
+        assert msg not in self.startTime, 'already started %s' % msg
         self.startTime[msg] = time.time()
         logging.info('started  '+msg)
 
     def end(self,msg):
         """End timing something."""
+        assert msg in self.startTime,"never started %s" % msg
         self.endTime[msg] = time.time()
         logging.info('finished '+msg + ' in %.3f sec' % (self.endTime[msg]-self.startTime[msg]))
 
@@ -242,7 +247,7 @@ class TaskStats(object):
             progressBar = '[*]'
             if s>0:
                 progressBar = "progress [" + ("#"*f) + ("."*(s-f))+"]"
-            buf.extend([' %-7s summary: %d/%d finished/started %s' % (k,self.numFinished[k],self.numStarted[k],progressBar)])
+            buf.extend([' %-8s: %s (%d/%d finished/started)' % (k,progressBar,self.numFinished[k],self.numStarted[k])])
         now = time.time()
         for k in sorted(self.startTime.keys()):
             if k in self.endTime:
@@ -308,76 +313,54 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
 
     # start subprocesses for mappers and reducers
 
-    TASK_STATS.start('_init mapper/reducer processes')
-    mapProcesses = []
-    for fi in infiles:
-        # WARNING: it doesn't seem to work well to start the processes
-        # inside a thread - this led to bugs with the reducer
-        # processes.  This is possibly a python library bug:
-        # http://bugs.python.org/issue1404925
-        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        mapProcesses.append(mapPipeI)
-    reduceProcesses = []
-    for j in range(numReduceTasks):    
-        reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        reduceProcesses.append(reducePipeJ)
-    TASK_STATS.end('_init mapper/reducer processes')
+    TASK_STATS.start('_init processes')
+    numMapTasks = len(infiles)
+    mapperTags =  map(lambda i:('mapper-from-%s-%s'%(indir,infiles[i])), range(numMapTasks))
+    reducerTags = map(lambda j:('reducer-to-%s-part%04d'%(outdir,j)), range(numReduceTasks))
+    reducerOut = map(lambda j:('part%04d'%j), range(numReduceTasks))
+    mapPipes = map(
+        lambda i: subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE),
+        range(numMapTasks))
+    reducePipes = map(
+        lambda j: subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE),
+        range(numReduceTasks))
+    #send input files to map processes
+    mapWriters = map(
+        lambda i: threading.Thread(target=fileToPipe, args=(mapperTags[i],usingGPFS,indir,infiles[i],mapPipes[i])),
+        range(numMapTasks))
+    #get output files from reduce processes
+    reduceReaders = map(
+        lambda j: threading.Thread(target=pipeToFile, args=(reducerTags[j],usingGPFS,outdir,reducerOut[j],reducePipes[j].stdout)),
+        range(numReduceTasks))        
 
-    # connect reducer processes to queues which collect their inputs
+    # connect reducer process j to a queues which collect's its input
     # connect mapper processes to the same set of queues
 
-    TASK_STATS.start('_init reduce buffer queues/map shuffler threads')
-    reducerQs = []        
-    shuffleThreads = []
-    acceptorThreads = []
-    for j in range(numReduceTasks):
-        reducePipeJ = reduceProcesses[j]
-        qj = Queue.Queue()
-        reducerQs.append(qj)
-        tj = threading.Thread(target=acceptReduceInputs, args=(qj,reducePipeJ))
-        tj.setDaemon(True)
-        acceptorThreads.append(tj)
-    for i in range(len(mapProcesses)):
-        mapPipeI = mapProcesses[i]
-        tagi = "%s/%s" % (indir,infiles[i])
-        ti = threading.Thread(target=shuffleMapOutputs, args=(tagi,numReduceTasks,mapPipeI,reducerQs))
-        shuffleThreads.append(ti)
-    TASK_STATS.end('_init reduce buffer queues/map shuffler threads')
+    reducerQs = map( lambda j: Queue.Queue(), range(numReduceTasks) )
+    shufflers = map(
+        lambda i: threading.Thread(target=shuffleMapOutputs, args=(mapperTags[i],numReduceTasks,mapPipes[i],reducerQs)),
+        range(numMapTasks))
+    acceptors = map( 
+        lambda j: threading.Thread(target=acceptReduceInputs, args=(reducerTags[j],reducerQs[j],numMapTasks,reducePipes[j])),
+        range(numReduceTasks))
 
-    # connect mappers/reducers to their file system inputs/outputs
+    #start up all the threads
+    for w in mapWriters: w.start()
+    for r in reduceReaders: r.start()
+    for a in acceptors: a.start()
+    for s in shufflers: s.start()
+    TASK_STATS.numStarted['mapper'] = numMapTasks
+    TASK_STATS.numStarted['shuffler'] = numReduceTasks
+    TASK_STATS.numStarted['reducer'] = numReduceTasks
+    TASK_STATS.end('_init processes')
 
-    TASK_STATS.start('_init mappers writers and reducer readers')
-    mapInWriters = []
-#    outputThreads = []
-    for i in range(len(mapProcesses)):
-        mapPipeI = mapProcesses[i]
-        fi = infiles[i]
-        ti = threading.Thread(target=fileToWritableFp, args=(usingGPFS,indir,fi,mapPipeI.stdin))
-        mapInWriters.append(ti)
-        ti.start()
-        #TODO: collect stderrs
-
-#    for j in range(numReduceTasks):
-#        fj = "part%04d" % j
-#        tj = threading.Thread(target=readableFpToFile, args=(usingGPFS,outdir,fj,reducePipeJ.stdout))
-#        #tj.start()
-#        outputThreads.append(tj)
-#       #TODO: collect stderrs
-#    TASK_STATS.end('_init mappers writers and reducer readers')
-
-    joinAll(mapInWriters,'_phase 1: join map input writers')
-    startAll(acceptorThreads)
-    startAll(shuffleThreads)
-    joinAll(shuffleThreads,'_phase 2: join shufflers')
-    joinAll(reducerQs,'_phase 3: join reducer Qs')
-#    TASK_STATS.start('_phase 4: closing reducer stdins')
-#    for reducePipeJ in reduceProcesses:
-#        reducePipeJ.stdin.close()
-#    TASK_STATS.end('_phase 4: closing reducer stdins')
-#    TASK_STATS.end('_phase 2: join shufflers')
-    #for q in reducerQs: q.join()
-    #for t in outputThreads: t.join()
-
+    #wait for threads to end
+    TASK_STATS.start('_joining threads')
+    for w in mapWriters: w.join()
+    for r in reduceReaders: r.join()
+    for a in acceptors: a.join()
+    for s in shufflers: s.join()
+    TASK_STATS.end('_joining threads')
 
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
@@ -389,125 +372,112 @@ def maponly(indir,outdir,mapper):
     # an input file, and outputs to the corresponding output file
 
     start = time.time()
-    TASK_STATS.start('_init mappers')
-    mapThreads = []
-    for fi in infiles:
-        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
-        mapThreadI.start()
-        mapThreads.append(mapThreadI)
-    TASK_STATS.end('_init mappers')
+    TASK_STATS.start('_init processes')
+    numMapTasks = len(infiles)
+    mapperTags = map( lambda i:('mapper--to-%s-%s'%(indir,infiles[i])), range(numMapTasks) )
+    mapPipes = map(
+        lambda i: subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE),
+        range(numMapTasks))
+    mapWriters = map(
+        lambda i: threading.Thread(target=fileToPipe, args=(mapperTags[i],usingGPFS,indir,infiles[i],mapPipes[i])),
+        range(numMapTasks))
+    mapReaders = map(
+        lambda i: threading.Thread(target=pipeToFile, args=(mapperTags[i],usingGPFS,outdir,infiles[i],mapPipes[i].stdout)),
+        range(numMapTasks))
+        
+    #start threads
+    for w in mapWriters: w.start()
+    for r in mapReaders: r.start()
+    TASK_STATS.end('_init processes')
 
-    TASK_STATS.start('_join mappers')
-    joinAll(mapThreads,'mappers')
-    TASK_STATS.end('_join mappers')
+    #join threads
+    TASK_STATS.start('_joining threads')
+    for w in mapWriters: w.join()
+    for r in mapReaders: r.join()
+    TASK_STATS.end('_joining threads')
 
 #
 # routines attached to threads
 #
 
-def runMapper(usingGPFS,mapPipe,indir,f,outdir):
-    inputString=getInput(usingGPFS,indir,f)
-    output = logCommunication(
-        mapPipe,inputString,
-        'mapper-from-%s/%s to %s/%s' % (indir,f,outdir,f))
-    putOutput(usingGPFS,outdir,f,output)
+def fileToPipe(tag,usingGPFS,indir,f,pipe):
+    global TASK_STATS
+    #task starts when you start giving it input
+    TASK_STATS.start(tag)
+    if 'input' in usingGPFS:
+        buf = FS.cat(indir,f)
+        pipe.stdin.write(buf)
+        TASK_STATS.inputSize[tag] = len(buf)
+    else:
+        TASK_STATS.inputSize[tag] = 0
+        for line in open(indir+"/"+f):
+            pipe.stdin.write(line)
+            TASK_STATS.inputSize[tag] += len(line)
+    pipe.stdin.close()
+    pipe.wait()
+
+def pipeToFile(tag,usingGPFS,outdir,f,pipeout):
+    global TASK_STATS
+    TASK_STATS.outputSize[tag] = 0
+    if 'output' in usingGPFS:
+        for line in pipeout:
+            FS.write(outdir,f,line)
+            TASK_STATS.outputSize[tag] += len(line)
+    else:
+        fp = open(outdir+"/"+f,'w')
+        for line in pipeout:
+            fp.write(line)
+            TASK_STATS.outputSize[tag] += len(line)
+        fp.close()
+    #this ends the task that's doing the writing
+    TASK_STATS.end(tag)
+    #beginning of tag tells if it's a mapper or reducer
+    for k in TASK_STATS.numFinished.keys():
+        if tag.startswith(k):
+            TASK_STATS.numFinished[k] += 1
 
 def shuffleMapOutputs(tag,numReduceTasks,mapPipe,reducerQs):
     """Thread that takes outputs of a map pipeline, hashes them, and
     sends them in the appropriate reduce queue."""
-
     global TASK_STATS
-    TASK_STATS.start('shuffle from %s' % (tag))
-    TASK_STATS.numStarted['shuffle'] += 1
+    TASK_STATS.outputSize[tag] = 0
     for line in mapPipe.stdout:
+        TASK_STATS.outputSize[tag] += len(line)
         k = key(line)
         h = hash(k) % numReduceTasks    
-        #reducierQs[h].put(line)
-        print 'q-d up ',line,
-    TASK_STATS.numFinished['shuffle'] += 1
-    TASK_STATS.end('shuffle from %s' % (tag))
-    mapPipe.wait()
+        reducerQs[h].put((h,line))
+    #signal to queue that this mapper is done
+    for q in reducerQs:
+        q.put(None)
+    #and track the ending
+    TASK_STATS.end(tag)
+    TASK_STATS.numFinished['mapper'] += 1
 
-def acceptReduceInputs(reducerQ,reducerPipe):
+def acceptReduceInputs(tag,reducerQ,numMappers,pipe):
     """Daemon thread that monitors a queue of items to add to a reducer
     input buffer."""
-    while True:
-        line = reducerQ.get()
-        print 'reduced',line,
-        #reducerPipe.stdin.write(line)
-        reducerQ.task_done()
-
-def fileToWritableFp(usingGPFS,indir,fi,fp):
-    if 'input' in usingGPFS:
-        fp.write(FS.cat(indir,fi))
-    else:
-        for line in open(indir+"/"+fi):
-            print 'writing',line,
-            fp.write(line)
-    fp.close()
-    logging.info('closed stdin after writing %s/%s to mapper' % (indir,fi))
-
-def readableFpToFile(usingGPFS,outdir,fj,fp):
-    if 'output' in usingGPFS:
-        for line in fp:
-            FS.write(outdir,fj,line)
-    else:
-        fp2 = open(outdir+"/"+fj,'w')
-        for line in fp:
-            fp2.write(line)
-        fp2.close()
-
-#
-# subroutines for map-reduce
-#
-
-def joinAll(threads,msg):
-    TASK_STATS.start(msg)
-    for t in threads: t.join()
-    TASK_STATS.end(msg)        
-
-def startAll(threads):
-    for t in threads: t.start()
-
-
-def logCommunication(pipe,inputString,pipeTag):
-    """Wraps a pipe.communicate() call with a bunch of logging chores."""
     global TASK_STATS
-    global FS
-
-    #record start
-    TASK_STATS.start(pipeTag)
-    for k in TASK_STATS.numStarted.keys():
-        if pipeTag.startswith(k): 
-            TASK_STATS.numStarted[k] += 1
-
-    #the actual work being done: send the input string to the pipe
-    #process, execute it, and return stdout and stderr results
-    TASK_STATS.inputSize[pipeTag] = len(inputString)
-    (output,log) = pipe.communicate(input=inputString)    
-    pipe.wait()
-
-    #record completion
-    TASK_STATS.end(pipeTag)
-    for k in TASK_STATS.numStarted.keys():
-        if pipeTag.startswith(k): 
-            TASK_STATS.numFinished[k] += 1
-
-    #save statistics and logs
-    TASK_STATS.outputSize[pipeTag] = len(output)
-    if not log: log=''
-    TASK_STATS.logSize[pipeTag] = len(log)
-    FS.write("gpfs:_logs",pipeTag,log)
-
-    #could also have been an error starting up the process
-    if pipe.returncode:
-        msg = "%s failed to start - return code %d" % (pipeTag,pipe.returncode)
-        logging.warn(msg)
-        FS.write("gpfs:_logs",pipeTag,msg)
-
-    #finally return stdout from pipe process
-    return output
+    TASK_STATS.start("writing shuffled data to "+tag)
+    #reducer also starts when data starts going to it
+    TASK_STATS.start(tag)
+    TASK_STATS.inputSize[tag] = 0
+    numPoison = 0
+    while True:
+        task = reducerQ.get()
+        if task:
+            key,line = task
+            pipe.stdin.write(line)
+            TASK_STATS.inputSize[tag] += len(line)
+            reducerQ.task_done()
+        else:
+            #some mapper has indicated that it's finished
+            numPoison += 1
+            if numPoison>=numMappers:
+                #all mappers are finished so exit
+                pipe.stdin.close()
+                TASK_STATS.end("writing shuffled data to "+tag)
+                TASK_STATS.numFinished['shuffler'] += 1
+                return
 
 def setupFiles(indir,outdir):
     """Work out what the input files are, and clear the output directory,

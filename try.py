@@ -1,64 +1,127 @@
 import subprocess
 import threading
 import Queue
+import sys
 
-def acceptQInput(q,rpipe):
+# testing threads....ok with 2 mappers and one reducer
+
+def key(line):
+    return 1 if (line.find("hello")>=0 or line.find("bye")>=0) else 0
+
+def acceptQInput(q,numMappers,pipe):
+    numPoison = 0
     while True:
         task = q.get()
         if task:
             key,line = task
-            print 'dequed',line,
-            rpipe.stdin.write(line)
+            print 'p dequed',key,line,
+            pipe.stdin.write(line)
             q.task_done()
         else:
-            rpipe.stdin.close()
-            return
+            numPoison += 1
+            print 'poison read: numPoison',numPoison
+            if numPoison>=numMappers:
+                pipe.stdin.close()
+                print 'returning from acceptQInput'
+                return
 
-def shuffleOutput(pipe,q):
-    for line in mpipe.stdout:
-        print "from mpipe:",line,
-        q.put((0,line))
+def shuffleOutput(pipe,qs):
+    for line in pipe.stdout:
+        print "p from mpipe:",line,
+        k = key(line)
+        qs[k].put((k,line))
+    for q in qs:
         q.put(None)
 
 def sendToFile(pipe,filename):
     fp = open(filename,'w')
     for line in pipe.stdout:
-        print "to "+filename,line,
+        print "p to "+filename,line,
         fp.write(line)
     fp.close()
 
 def getFromFile(pipe,filename):
     for line in open(filename):
-        print "to mpipe:",line,
+        print "p to mpipe:",line,
         pipe.stdin.write(line)
     pipe.stdin.close()
-    print "closed mpipe input"
+    pipe.wait()
+    print "p closed mpipe input"
+
 
 if __name__ == "__main__":
-    mpipe = subprocess.Popen('cat',shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 
-    r = threading.Thread(target=getFromFile,args=(mpipe,"test.txt"))
-    r.start()
-    mpipe.wait()
-    r.join()
-    #mpipe.stdin.write("hello world\n")
-    #mpipe.stdin.close()
+    try:
+        p = int(sys.argv[1])
+    except Exception:
+        p = 0
+    print 'p =',p
+    km = 2
+    kr = 2
 
-    rpipe = subprocess.Popen('sort | cat -n',shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    q = Queue.Queue()
-    a = threading.Thread(target=acceptQInput,args=(q,rpipe))
-    s = threading.Thread(target=shuffleOutput,args=(mpipe,q))
-    w = threading.Thread(target=sendToFile,args=(rpipe,"tmp.txt"))
-    for t in [a,s,w]:
-        t.start()
-    for t in [q,r,a,s,w]:
-        t.join()
+    mpipes = []
+    for i in range(km):    
+        mpipe = subprocess.Popen('cat',shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        mpipes.append(mpipe)
+    mpipe = None
 
-    #for line in mpipe.stdout:
-    #   print "from mpipe:",line,
-    #   q.put((0,line))
-    #  q.put(None)
+    if p>=1:
+        readers = map(lambda i: threading.Thread(target=getFromFile,args=(mpipes[i],("test%d.txt" %i ))), range(km))
+        if p<10:
+            for r in readers: r.start()
+            print 'joining readers'
+            for r in readers: r.join()
+            print 'joined readers'
+    else:
+        for i in range(km):
+            for line in open(("test%d.txt" % i )):
+                mpipes[i].stdin.write(line)
+            mpipes[i].stdin.close()
 
-    #for line in rpipe.stdout:
-    #   print 'from rpipe',line,
+    rpipes = []
+    for j in range(kr):
+        rpipe = subprocess.Popen('sort | cat -n',shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        rpipes.append(rpipe)
+
+    if p>=2:
+        qs = map(lambda i:Queue.Queue(), range(kr))
+        shufflers = map(lambda i: threading.Thread(target=shuffleOutput,args=(mpipes[i],qs)), range(km))
+        acceptors = map(lambda j:threading.Thread(target=acceptQInput,args=(qs[j],km,rpipes[j])), range(kr))
+        if p<10:
+            for s in shufflers: s.start()
+            for a in acceptors: a.start()
+            print 'joining acceptor, shufflers'
+            for s in shufflers: s.join()
+            for a in acceptors: a.join()
+            print 'joined acceptor, shufflers'
+    else:
+        for mpipe in mpipes:
+            for line in mpipe.stdout:
+                k = key(line)
+                print "s from mpipe:",k,line,
+                rpipes[k].stdin.write(line)
+        for j in range(kr):
+            rpipes[j].stdin.close()
+
+    if p>=3:
+        writers = map(lambda j:threading.Thread(target=sendToFile,args=(rpipes[j],"tmp%d.txt" % j)), range(kr))
+        if p<10:
+            for w in writers: w.start()
+            for w in writers: w.join()
+    else:
+        for j in range(kr):
+            for line in rpipes[j].stdout:
+                print 's from rpipe',j,line,
+
+    if p>=10:
+        for r in readers: r.start()
+        for s in shufflers: s.start()
+        for a in acceptors: a.start()
+        for w in writers: w.start()
+
+        for r in readers: r.join()
+        for s in shufflers: s.join()
+        for a in acceptors: a.join()
+        for w in writers: w.join()
+
 
