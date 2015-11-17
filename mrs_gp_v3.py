@@ -13,12 +13,12 @@ import time
 import traceback
 import cStringIO
 import select
+import fcntl
 
 #
-# status: _communicate seems to work ok for sharding, but not for the
-# learning task...maybe problem is in polling pipe processes that 
-# are a shell and a pipe inside that...?
-# 
+# still blocking on reads from pipe....maybe I need to go to the
+# os.read, os.write model....write the full string by bufsize, and
+# read by buf size, and worry about the splitting later..
 
 ##############################################################################
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
@@ -89,10 +89,16 @@ def fmtchars(n):
     return "%d(%.1fM)" % (n,mb)
 
 def makePipe(shellCom):
-    return subprocess.Popen(shellCom,shell=True, bufsize=-1,
-                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE)
-    
+    p = subprocess.Popen(shellCom,shell=True, bufsize=4096,
+                         stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    # make stderr, stdout no-blocking
+    def unblock(fp):
+        flags = fcntl.fcntl(fp, fcntl.F_GETFL) # get current p.stdout flags
+        fcntl.fcntl(fp, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    unblock(p.stdout)
+    unblock(p.stderr)
+    return p
 
 ##############################################################################
 #
@@ -477,7 +483,7 @@ def logCommunication(pipe,inputString,pipeTag):
     t = threading.Thread(target=_communicate, args=(pipe,inputString,result))
     t.start()
     t.join()
-    (output,log) = (result['stdout'],result['stderr'])
+    (output,log) = (result['stdout'].getvalue(),result['stderr'].getvalue())
 
     #record completion
     TASK_STATS.end(pipeTag)
@@ -500,98 +506,61 @@ def logCommunication(pipe,inputString,pipeTag):
     #finally return stdout from pipe process
     return output
 
-def _communicate(pipe,inp,result):
-    outbuf = []
-    errbuf = []
-    inbuf = map(lambda x:x+"\n", inp.split("\n"))[:-1]
+def _communicate(pipe,inbuf,result):
+
+    activeInputs = [pipe.stdin]
+    activeOutputFPs = {pipe.stdout:'stdout',pipe.stderr:'stderr'}
+    TIMEOUT = 5
+    BUFSIZ = 2048
     inbufPtr = 0
-    inEOF = len(inbuf)==0
-    outEOF = False
-    errEOF = False
-    touched = time.time()
-    waited = 0
-    TIMEOUT = 10
-    inputSize = 0
+    result['stdout'] = cStringIO.StringIO()
+    result['stderr'] = cStringIO.StringIO()
+
     while True:
-        time.sleep(0.01)
-        #figure out if stdin is active
-        inHandles = [] if inEOF else [pipe.stdin]
-        #find out where data is ready
-        readable,writeable,exceptional = select.select(
-            [pipe.stdout,pipe.stderr],inHandles,[pipe.stdout,pipe.stderr]+inHandles, 0)
+#        print 'stdin',inbufPtr,'stdout',len(result['stdout'].getvalue()), \
+#             'stderr',len(result['stderr'].getvalue())
+
+        readable,writeable,exceptional = \
+            select.select(activeOutputFPs.keys(), activeInputs, activeOutputFPs.keys()+activeInputs, 0)
         assert not exceptional,'exceptional files + %r' % exceptional
-        print 'readable',readable
-        print 'writeable',readable
-        if False:
+
+        #print readable,writeable
+
+        progress = False
+        for fp in readable:
+            #print '-',
+            tmp = os.read(fp.fileno(), BUFSIZ)
+            if len(tmp) > 0:
+                key = activeOutputFPs[fp]
+                result[key].write(tmp)                
+                progress = True
+            else:
+                fp.close()
+                del activeOutputFPs[fp]
+
+        if writeable:
+            #singleton list
+            hi = inbufPtr+BUFSIZ
+            if hi>len(inbuf): hi=len(inbuf)
+            #print '+',hi,len(inbuf)
+            n = os.write(writeable[0].fileno(), inbuf[inbufPtr:hi])
+            #print 'w',n
+            if n>0:
+                inbufPtr += n
+                progress = True
+            if n==0 or inbufPtr>=len(inbuf):
+                pipe.stdin.close()
+                activeInputs = []
+
+        if progress:
+            #print '.',
             pass
-        elif pipe.stdout in readable and not outEOF:
-            print 'reading stdout...'
-            line = pipe.stdout.readline()
-            print 'read stdout done.'
-            touched = time.time()
-            if line:
-                outbuf.append(line)
-                #print 'read stdout [',line.strip(),"]"
-            else:
-                #print 'eof output'
-                outEOF = True
-        elif pipe.stdin in writeable and not inEOF:
-            #try to write
-            try:
-                print 'write stdin',inbufPtr,' [',inbuf[inbufPtr][0:20],"...] size",inputSize
-            except IndexError as ex:
-                print 'indexerror! ',inbufPtr,len(inbuf)
-                print 'pipe poll',pipe.poll()
-                print 'pipe status',pipe.returncode
-            try:
-
-
-
-
-
-
-
-
-
-                pipe.stdin.write(inbuf[inbufPtr])
-                print 'wrote stdin [',inbuf[inbufPtr][0:20],"...]"
-                inputSize += len(inbuf[inbufPtr])
-                touched = time.time()
-                inbufPtr += 1
-                if inbufPtr>=len(inbuf): 
-                    inEOF = True
-                    print '!!!closing STDIN'
-                    pipe.stdin.close()
-            except IOError as ex:
-                print 'ioerror! ',inbufPtr,len(inbuf)
-                print 'pipe poll',pipe.poll()
-                print 'pipe status',pipe.returncode
-                raise
-        elif pipe.stderr in readable and not errEOF:
-            line = pipe.stderr.readline()
-            touched = time.time()
-            if line:
-                errbuf.append( line)
-                #print 'read stderr'
-            else:
-                errEOF = True
         elif pipe.poll()!=None:
-            #finished
-            #print 'finished - outbuf',outbuf,'errbuf',errbuf,'pipe.poll',pipe.poll()
-            pipe.stdout.close()
-            pipe.stderr.close()
-            pipe.wait()
-            result['stdout'] = "".join(outbuf)
-            result['stderr'] = "".join(errbuf)
             return
         else:
-            if time.time() - touched > TIMEOUT:
-                log.warn('timeout!!!')
-                return
-            logging.warn('sleeping')
-            time.sleep(1)
-            pass
-
+            print '?..',
+            time.sleep(0.1)
+                    
 
 def setupFiles(indir,outdir):
     """Work out what the input files are, and clear the output directory,
