@@ -83,6 +83,11 @@ def fmtchars(n):
     mb = n/(1024*1024.0)
     return "%d(%.1fM)" % (n,mb)
 
+def makePipe(shellCom):
+    return subprocess.Popen(shellCom,shell=True,
+                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+
 ##############################################################################
 #
 # shared "file system"
@@ -317,27 +322,23 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     mapperTags =  map(lambda i:('mapper-from-%s-%s'%(indir,infiles[i])), range(numMapTasks))
     reducerTags = map(lambda j:('reducer-to-%s-part%04d'%(outdir,j)), range(numReduceTasks))
     reducerOut = map(lambda j:('part%04d'%j), range(numReduceTasks))
-    mapPipes = map(
-        lambda i: subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE),
-        range(numMapTasks))
-    reducePipes = map(
-        lambda j: subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE),
-        range(numReduceTasks))
+    mapPipes = map(lambda i: makePipe(mapper), range(numMapTasks))
+    reducePipes = map(lambda j: makePipe("sort -k1 | "+reducer), range(numReduceTasks))
     #send input files to map processes
     mapWriters = map(
         lambda i: threading.Thread(target=fileToPipe, args=(mapperTags[i],usingGPFS,indir,infiles[i],mapPipes[i])),
         range(numMapTasks))
     #get output files from reduce processes
     reduceReaders = map(
-        lambda j: threading.Thread(target=pipeToFile, args=(reducerTags[j],usingGPFS,outdir,reducerOut[j],reducePipes[j].stdout)),
+        lambda j: threading.Thread(target=pipeToFile, args=(reducerTags[j],usingGPFS,outdir,reducerOut[j],reducePipes[j])),
         range(numReduceTasks))        
     #get error logs
-    mapLoggers = map(
-        lambda i: threading.Thread(target=pipeToLog, args=("_logs",mapperTags[i],mapPipes[i].stderr)),
-        range(numMapTasks))
-    reduceLoggers = map(
-        lambda j: threading.Thread(target=pipeToLog, args=("_logs",reducerTags[j],reducePipes[j].stderr)),
-        range(numReduceTasks))
+#    mapLoggers = map(
+#        lambda i: threading.Thread(target=pipeToLog, args=("_logs",mapperTags[i],mapPipes[i].stderr)),
+#        range(numMapTasks))
+#    reduceLoggers = map(
+#        lambda j: threading.Thread(target=pipeToLog, args=("_logs",reducerTags[j],reducePipes[j].stderr)),
+#        range(numReduceTasks))
 
     # connect reducer process j to a queues which collect's its input
     # connect mapper processes to the same set of queues
@@ -350,27 +351,34 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         lambda j: threading.Thread(target=acceptReduceInputs, args=(reducerTags[j],reducerQs[j],numMapTasks,reducePipes[j])),
         range(numReduceTasks))
 
-    #start up all the threads
-    for w in mapWriters: w.start()
-    for r in reduceReaders: r.start()
-    for a in acceptors: a.start()
-    for s in shufflers: s.start()
-    for el in mapLoggers: el.start()
-    for el in reduceLoggers: el.start()
+    #send data to mappers
     TASK_STATS.numStarted['mapper'] = numMapTasks
+    TASK_STATS.start('_give data to mappers')
+    for w in mapWriters: w.start()
+    for w in mapWriters: w.join()
+    TASK_STATS.end('_give data to mappers')
+
+    #collect data from mappers and send to reducers
     TASK_STATS.numStarted['shuffler'] = numReduceTasks
     TASK_STATS.numStarted['reducer'] = numReduceTasks
-    TASK_STATS.end('_init processes')
-
-    #wait for threads to end
-    TASK_STATS.start('_joining threads')
-    for w in mapWriters: w.join()
-    for r in reduceReaders: r.join()
-    for a in acceptors: a.join()
+    TASK_STATS.start('_give data to reducers')
+    #for el in mapLoggers: el.start()
+    for s in shufflers: s.start()
+    print 's.join...'
     for s in shufflers: s.join()
-    for el in mapLoggers: el.join()
-    for el in reduceLoggers: el.join()
-    TASK_STATS.end('_joining threads')
+    print 'a.start...'
+    for a in acceptors: a.start()
+    for a in acceptors: a.join()
+    #for el in mapLoggers: el.join()
+    TASK_STATS.start('_give data to reducers')
+
+    #collect data from reducers
+    TASK_STATS.start('_run reducers')
+    for r in reduceReaders: r.start()
+    #for el in reduceLoggers: el.start()
+    for r in reduceReaders: r.join()
+    #for el in reduceLoggers: el.join()
+    TASK_STATS.start('_run reducers')
 
 def maponly(indir,outdir,mapper):
     """Like mapreduce but for a mapper-only process."""
@@ -385,31 +393,30 @@ def maponly(indir,outdir,mapper):
     TASK_STATS.start('_init processes')
     numMapTasks = len(infiles)
     mapperTags = map( lambda i:('mapper--to-%s-%s'%(indir,infiles[i])), range(numMapTasks) )
-    mapPipes = map(
-        lambda i: subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE),
-        range(numMapTasks))
+    mapPipes = map( lambda i: makePipe(mapper), range(numMapTasks))
     mapWriters = map(
         lambda i: threading.Thread(target=fileToPipe, args=(mapperTags[i],usingGPFS,indir,infiles[i],mapPipes[i])),
         range(numMapTasks))
     mapReaders = map(
-        lambda i: threading.Thread(target=pipeToFile, args=(mapperTags[i],usingGPFS,outdir,infiles[i],mapPipes[i].stdout)),
+        lambda i: threading.Thread(target=pipeToFile, args=(mapperTags[i],usingGPFS,outdir,infiles[i],mapPipes[i])),
         range(numMapTasks))
-    mapLoggers = map(
-        lambda i: threading.Thread(target=pipeToLog, args=("_logs",mapperTags[i],mapPipes[i].stderr)),
-        range(numMapTasks))
+#    mapLoggers = map(
+#        lambda i: threading.Thread(target=pipeToLog, args=("_logs",mapperTags[i],mapPipes[i].stderr)),
+#        range(numMapTasks))
+    TASK_STATS.end('_init processes')
         
     #start threads
+    TASK_STATS.start('_give data to mappers')
     for w in mapWriters: w.start()
-    for r in mapReaders: r.start()
-    for el in mapLoggers: el.start()
-    TASK_STATS.end('_init processes')
-
-    #join threads
-    TASK_STATS.start('_joining threads')
     for w in mapWriters: w.join()
+    TASK_STATS.end('_give data to mappers')
+
+    TASK_STATS.start('_run mappers')
+    for r in mapReaders: r.start()
+#    for el in mapLoggers: el.start()
     for r in mapReaders: r.join()
-    for el in mapLoggers: el.join()
-    TASK_STATS.end('_joining threads')
+#    for el in mapLoggers: el.join()
+    TASK_STATS.end('_run mappers')
 
 #
 # routines attached to threads
@@ -429,18 +436,25 @@ def fileToPipe(tag,usingGPFS,indir,f,pipe):
             pipe.stdin.write(line)
             TASK_STATS.inputSize[tag] += len(line)
     pipe.stdin.close()
+    print 'closed stdin for',pipe
     pipe.wait()
+    print 'waited stdin for',pipe
 
-def pipeToFile(tag,usingGPFS,outdir,f,pipeout):
+def pipeToFile(tag,usingGPFS,outdir,f,pipe):
     global TASK_STATS
     TASK_STATS.outputSize[tag] = 0
+    buf = pipe.stdout.read()
+    pipe.stdout.close()
+    pipe.wait()
     if 'output' in usingGPFS:
-        for line in pipeout:
+        for line0 in buf.split("\n"):
+            line = line0 + "\n"
             FS.write(outdir,f,line)
             TASK_STATS.outputSize[tag] += len(line)
     else:
         fp = open(outdir+"/"+f,'w')
-        for line in pipeout:
+        for line0 in buf.split("\n"):
+            line = line0 + "\n"
             fp.write(line)
             TASK_STATS.outputSize[tag] += len(line)
         fp.close()
@@ -457,17 +471,25 @@ def pipeToLog(outdir,tag,pipeout):
     for line in pipeout:
         FS.write(outdir,tag,line)
         TASK_STATS.logSize[tag] += len(line)
+    pipeout.close()
 
 def shuffleMapOutputs(tag,numReduceTasks,mapPipe,reducerQs):
     """Thread that takes outputs of a map pipeline, hashes them, and
     sends them in the appropriate reduce queue."""
+    print 'shuffling',mapPipe
     global TASK_STATS
     TASK_STATS.outputSize[tag] = 0
-    for line in mapPipe.stdout:
+    buf = mapPipe.stdout.read()
+    print 'read map output'
+    mapPipe.stdout.close()
+    for line0 in buf.split("\n"):
+        line = line0 + "\n"
+        print 'read from',mapPipe,line,
         TASK_STATS.outputSize[tag] += len(line)
         k = key(line)
         h = hash(k) % numReduceTasks    
         reducerQs[h].put((h,line))
+    print 'poison',mapPipe
     #signal to queue that this mapper is done
     for q in reducerQs:
         q.put(None)

@@ -14,6 +14,12 @@ import traceback
 import cStringIO
 import select
 
+#
+# status: _communicate seems to work ok for sharding, but not for the
+# learning task...maybe problem is in polling pipe processes that 
+# are a shell and a pipe inside that...?
+# 
+
 ##############################################################################
 # Map Reduce Streaming for GuineaPig (mrs_gp) - very simple
 # multi-threading map-reduce, to be used with inputs/outputs which are
@@ -81,6 +87,12 @@ def fmtchars(n):
     equivalent size in megabytes."""
     mb = n/(1024*1024.0)
     return "%d(%.1fM)" % (n,mb)
+
+def makePipe(shellCom):
+    return subprocess.Popen(shellCom,shell=True, bufsize=-1,
+                            stdin=subprocess.PIPE,stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+    
 
 ##############################################################################
 #
@@ -333,7 +345,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
         # inside a thread - this led to bugs with the reducer
         # processes.  This is possibly a python library bug:
         # http://bugs.python.org/issue1404925
-        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        mapPipeI = makePipe(mapper)
         si = threading.Thread(target=shuffleMapOutputs, args=(usingGPFS,numReduceTasks,mapPipeI,indir,fi,reducerQs))
         si.start()                      # si will join the mapPipe process
         mappers.append(si)
@@ -354,7 +366,7 @@ def mapreduce(indir,outdir,mapper,reducer,numReduceTasks):
     TASK_STATS.start('_init reducers')
     reducers = []
     for j in range(numReduceTasks):    
-        reducePipeJ = subprocess.Popen("sort -k1 | "+reducer,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        reducePipeJ = makePipe("sort -k1 | "+reducer)
         # thread to feed data into the reducer process
         uj = threading.Thread(target=runReducer, 
                               args=(usingGPFS,reducePipeJ,reducerBuffers[j],("part%05d" % j),outdir))
@@ -380,7 +392,7 @@ def maponly(indir,outdir,mapper):
     TASK_STATS.start('_init mappers')
     mapThreads = []
     for fi in infiles:
-        mapPipeI = subprocess.Popen(mapper,shell=True,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        mapPipeI = makePipe(mapper)
         mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
         mapThreadI.start()
         mapThreads.append(mapThreadI)
@@ -491,44 +503,81 @@ def logCommunication(pipe,inputString,pipeTag):
 def _communicate(pipe,inp,result):
     outbuf = []
     errbuf = []
-    inbuf = map(lambda x:x+"\n", inp.split("\n"))
+    inbuf = map(lambda x:x+"\n", inp.split("\n"))[:-1]
     inbufPtr = 0
-    inEOF = False
+    inEOF = len(inbuf)==0
     outEOF = False
     errEOF = False
-    start = time.time()
+    touched = time.time()
+    waited = 0
+    TIMEOUT = 10
+    inputSize = 0
     while True:
+        time.sleep(0.01)
         #figure out if stdin is active
         inHandles = [] if inEOF else [pipe.stdin]
         #find out where data is ready
         readable,writeable,exceptional = select.select(
             [pipe.stdout,pipe.stderr],inHandles,[pipe.stdout,pipe.stderr]+inHandles, 0)
-        if pipe.stdin in writeable and not inEOF:
-            #try to read
-            pipe.stdin.write(inbuf[inbufPtr])
-            print 'write stdin [',inbuf[inbufPtr].strip(),"]"
-            inbufPtr += 1
-            if inbufPtr>=len(inbuf): 
-                inEOF = True
-                pipe.stdin.close()
+        assert not exceptional,'exceptional files + %r' % exceptional
+        print 'readable',readable
+        print 'writeable',readable
+        if False:
+            pass
         elif pipe.stdout in readable and not outEOF:
+            print 'reading stdout...'
             line = pipe.stdout.readline()
+            print 'read stdout done.'
+            touched = time.time()
             if line:
                 outbuf.append(line)
-                print 'read stdout [',line.strip(),"]"
+                #print 'read stdout [',line.strip(),"]"
             else:
-                print 'eof output'
+                #print 'eof output'
                 outEOF = True
+        elif pipe.stdin in writeable and not inEOF:
+            #try to write
+            try:
+                print 'write stdin',inbufPtr,' [',inbuf[inbufPtr][0:20],"...] size",inputSize
+            except IndexError as ex:
+                print 'indexerror! ',inbufPtr,len(inbuf)
+                print 'pipe poll',pipe.poll()
+                print 'pipe status',pipe.returncode
+            try:
+
+
+
+
+
+
+
+
+
+                pipe.stdin.write(inbuf[inbufPtr])
+                print 'wrote stdin [',inbuf[inbufPtr][0:20],"...]"
+                inputSize += len(inbuf[inbufPtr])
+                touched = time.time()
+                inbufPtr += 1
+                if inbufPtr>=len(inbuf): 
+                    inEOF = True
+                    print '!!!closing STDIN'
+                    pipe.stdin.close()
+            except IOError as ex:
+                print 'ioerror! ',inbufPtr,len(inbuf)
+                print 'pipe poll',pipe.poll()
+                print 'pipe status',pipe.returncode
+                raise
         elif pipe.stderr in readable and not errEOF:
             line = pipe.stderr.readline()
+            touched = time.time()
             if line:
                 errbuf.append( line)
-                print 'read stderr'
+                #print 'read stderr'
             else:
                 errEOF = True
         elif pipe.poll()!=None:
             #finished
-            print 'finished - outbuf',outbuf,'errbuf',errbuf,'pipe.poll',pipe.poll()
+            #print 'finished - outbuf',outbuf,'errbuf',errbuf,'pipe.poll',pipe.poll()
             pipe.stdout.close()
             pipe.stderr.close()
             pipe.wait()
@@ -536,11 +585,12 @@ def _communicate(pipe,inp,result):
             result['stderr'] = "".join(errbuf)
             return
         else:
-            print 'waiting poll',pipe.poll()
-            time.sleep(0.5)
-            if time.time() > start+5:
-                print 'timeout!!!'
+            if time.time() - touched > TIMEOUT:
+                log.warn('timeout!!!')
                 return
+            logging.warn('sleeping')
+            time.sleep(1)
+            pass
 
 
 def setupFiles(indir,outdir):
