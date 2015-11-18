@@ -558,8 +558,8 @@ def _communicate(pipe,inbuf,result):
         elif pipe.poll()!=None:
             return
         else:
-            print '?..',
-            time.sleep(0.1)
+            #print '?..',
+            time.sleep(0.001)
                     
 
 def setupFiles(indir,outdir):
