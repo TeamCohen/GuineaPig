@@ -8,7 +8,7 @@ if __name__ == "__main__":
     for line in sys.stdin:
         k += 1
         print line,
-        if k % 1000 == 0: 
+        if k % 3 == 0: 
             logging.warn('sleep after ' + str(k) + ' lines...')
             time.sleep(1)
 

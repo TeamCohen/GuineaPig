@@ -1,5 +1,5 @@
 MRS=pypy ../mrs_gp_v2.py
-K=10
+K=3
 
 #
 clean: 
@@ -8,14 +8,16 @@ clean:
 # file-file
 
 copy:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
 	$(MRS) --shutdown
 	echo should be the same
 	sum test/* /tmp/test-copy/*
 
 copy2:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
 	$(MRS) --shutdown
@@ -23,7 +25,8 @@ copy2:
 	sum test/* /tmp/test-copy/*
 
 shard:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
 	$(MRS) --shutdown
 	echo should have 3 files
@@ -41,9 +44,10 @@ down:
 shard-fixed-server:
 	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
 
-reshard:
-	make -f Makefile.serve shard
-	bash start-server.sh
+reshard: 
+	make -B shard
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input /tmp/test-copy --output /tmp/test-copy2 --mapper cat --reducer cat --numReduceTasks 2
 	$(MRS) --shutdown
 	echo should have 3 files
@@ -58,7 +62,8 @@ reshard:
 # file-memory 
 
 load:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat
 	$(MRS) --send '/getmerge?dir=test-copy' > tmp.txt
 	$(MRS) --shutdown
@@ -66,7 +71,8 @@ load:
 	sum test/* tmp.txt
 
 load-shard:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 3
 	echo should have 3 files
 	$(MRS) --send '/ls?dir=test-copy'
@@ -77,7 +83,8 @@ load-shard:
 	sort tmp.txt | sum
 
 roundtrip:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat 
 	$(MRS) --task --output /tmp/test-copy --input gpfs:test-copy --mapper cat
 	$(MRS) --shutdown
@@ -86,7 +93,8 @@ roundtrip:
 	sort /tmp/test-copy/* | sum
 
 roundtrip-reshard:
-	bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 3
 	$(MRS) --task --output /tmp/test-copy --input gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 2
 	$(MRS) --shutdown
@@ -95,7 +103,8 @@ roundtrip-reshard:
 	sort /tmp/test-copy/* | sum
 
 parallel-events.txt: 
-	echo bash start-server.sh
+	$(MRS) --serve &
+	sleep 1
 	echo sharding to $(K) shards
 	time  $(MRS) --task --input unsharded --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo training naive bayes in parallel
@@ -106,6 +115,14 @@ parallel-events.txt:
 	echo export
 	$(MRS) --send '/getmerge?dir=events' > parallel-events.txt
 	echo $(MRS) --shutdown
+
+parallel-events-ram: 
+	echo sharding to $(K) shards
+	time  $(MRS)  --input unsharded --output /mnt/ramdisk/mrs/sharded --mapper cat --reducer cat --numReduceTasks $(K)
+	echo training naive bayes in parallel
+	time $(MRS) --input /mnt/ramdisk/mrs/sharded --output /mnt/ramdisk/mrs/events --numReduceTasks $(K) \
+		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
+		--reducer 'python sum-events.py'
 
 # --streamTrain 100
 # threads      shard	learn
@@ -123,7 +140,7 @@ BIG=bigfile1  #100M
 
 bigfile-times:
 	echo sharding
-	echo bash start-server.sh
+	echo $(MRS) --serve &
 	time $(MRS) --task --input $(RAM)/$(BIG) --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
 	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)

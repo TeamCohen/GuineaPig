@@ -5,6 +5,16 @@ Branching:
  | | | mrs_serve_opt???
 
 TODO for mrs_gp.py:
+ -- mrs_gp - works with communicate, but only get about a 4x speedup, which maybe isn't that nice.
+ possible that it would be better with more asynchronous behavior
+ -- mrs_gp_v2a.py - clearer way of setting up arrays of pipes and such, but doesn't work
+ -- mrs_gp_v3.py - my own more asynchronous version of _communicate, which seems to work,
+ but the wrapper code doesn't exploit the asynchronous behavior
+ -- mrs_gp_v2.py - trying to clean up mrs_gp_v3.py and make it more asynchronous - but it doesn't
+ actually work anymore :-(
+ -- better plan: fork v3 and start cleaning, then introducing async behavior a little at a time.
+
+ -- monitor mapper/reducer/shuffler min-max-avg
  -- server timeout, for security, in case I leave it running...?
  -- restrict opened files to a subdirectory - "./" + foo 
  -- add an 'abort task' method for server...? or maybe kill client thread?
