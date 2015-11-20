@@ -395,18 +395,84 @@ def maponly(indir,outdir,mapper):
     # an input file, and outputs to the corresponding output file
 
     start = time.time()
-    TASK_STATS.start('_init mappers')
-    mapThreads = []
-    for fi in infiles:
-        mapPipeI = makePipe(mapper)
-        mapThreadI = threading.Thread(target=runMapper, args=(usingGPFS,mapPipeI,indir,fi,outdir))
-        mapThreadI.start()
-        mapThreads.append(mapThreadI)
-    TASK_STATS.end('_init mappers')
+    numMapTasks = len(infiles)
+    mapTags = map(
+        lambda i:'mapper-from-%s-%s' % (indir,infiles[i]),
+        range(numMapTasks))
+    mapPipes = map(
+        lambda i:makePipe(mapper), 
+        range(numMapTasks))
+    mapThreads = map(
+        lambda i:threading.Thread(target=runPipe, 
+                                  args=(mapTags[i],mapPipes[i],
+                                        usingGPFS,indir,infiles[i],outdir,infiles[i])),
+        range(numMapTasks))
+    TASK_STATS.start('_running mappers')
+    for t in mapThreads: t.start()
+    for t in mapThreads: t.join()
+    TASK_STATS.end('_running mappers')
 
-    TASK_STATS.start('_join mappers')
-    joinAll(mapThreads,'mappers')
-    TASK_STATS.end('_join mappers')
+def runPipe(tag,pipe,usingGPFS,indir,infile,outdir,outfile):
+
+    activeInputs = [pipe.stdin]
+    activeOutputFPs = {pipe.stdout:'stdout',pipe.stderr:'stderr'}
+    TIMEOUT = 5
+    BUFSIZ = 2048
+    inbuf = getInput(usingGPFS,indir,infile)
+    inbufPtr = 0
+    result['stdout'] = cStringIO.StringIO()
+    result['stderr'] = cStringIO.StringIO()
+
+    global TASK_STATS
+    TASK_STATS.start(tag)
+    while True:
+#        print 'stdin',inbufPtr,'stdout',len(result['stdout'].getvalue()), \
+#             'stderr',len(result['stderr'].getvalue())
+
+        readable,writeable,exceptional = \
+            select.select(activeOutputFPs.keys(), activeInputs, activeOutputFPs.keys()+activeInputs, 0)
+        assert not exceptional,'exceptional files + %r' % exceptional
+
+        print readable,writeable
+
+        progress = False
+        for fp in readable:
+            print '-',
+            tmp = os.read(fp.fileno(), BUFSIZ)
+            if len(tmp) > 0:
+                key = activeOutputFPs[fp]
+                result[key].write(tmp)                
+                progress = True
+            else:
+                fp.close()
+                del activeOutputFPs[fp]
+
+        if writeable:
+            #singleton list
+            hi = inbufPtr+BUFSIZ
+            if hi>len(inbuf): hi=len(inbuf)
+            print '+',hi,len(inbuf)
+            n = os.write(writeable[0].fileno(), inbuf[inbufPtr:hi])
+            #print 'w',n
+            if n>0:
+                inbufPtr += n
+                progress = True
+            if n==0 or inbufPtr>=len(inbuf):
+                pipe.stdin.close()
+                activeInputs = []
+
+        if progress:
+            print '.',
+            pass
+        elif pipe.poll()!=None:
+            return
+        else:
+            print '?..',
+            time.sleep(0.001)
+
+    #finished the loop
+    TASK_STATS.end(tag)
+    putOutput(usingGPFS,outdir,infile,result['stderr'])
 
 #
 # routines attached to threads

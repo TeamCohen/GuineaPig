@@ -1,4 +1,4 @@
-MRS=pypy ../mrs_gp_v2.py
+MRS=pypy ../mrs_gp_v4.py
 K=3
 
 #
