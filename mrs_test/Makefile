@@ -1,11 +1,21 @@
-MRS=pypy ../mrs_gp_v4.py
+MRS=python ../mrs_gp_v4.py
 K=3
 
 #
 clean: 
 	rm -rf /tmp/test-copy parallel-events.txt
 
+backup:
+	cp ../mrs_gp_v4.py ../backup/`date "+%H:%M:%S"`-mrs_gp_v4.py
+
 # file-file
+
+shard-sample:
+
+	time  $(MRS) --input unsharded-sample --output /tmp/sample-copy --mapper cat --reducer cat --numReduceTasks $(K)
+	echo should be the same
+	sort unsharded-sample/* | sum
+	sort /tmp/sample-copy/* | sum
 
 copy:
 	$(MRS) --serve &
