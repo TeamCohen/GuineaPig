@@ -402,9 +402,12 @@ def maponly(indirList,outdir,mapper):
 ####################
 # pipe threads
 
+BUFFER_SIZE = 32*1024*1024
+SLEEP_DURATION = 0.1
+
 def makePipe(shellCom):
     """Create a subprocess that communicates via stdin, stdout, stderr."""
-    p = subprocess.Popen(shellCom,shell=True, bufsize=-1,
+    p = subprocess.Popen(shellCom,shell=True, bufsize=BUFFER_SIZE,
                          stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE)
     return p
@@ -449,8 +452,9 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
     collectors = {'stdout':outCollector, 'stderr':errCollector}
     #the part of inbuf previously written is always inbuf[:inbufPtr]
     inbufPtr = 0
-    # how much to send at a time to the pipe
-    BUFSIZ = 2048
+    # how much to send at a time to the pipe, this is guaranteed by
+    # posix, for some reason select.PIPE_BUF doesn't seem to exist
+    MIN_PIPE_BUFFER_SIZE = min(512,BUFFER_SIZE)
 
     global TASK_STATS
     TASK_STATS.start(tag)
@@ -476,7 +480,7 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
             # key will be string 'stdout' or 'stdin'
             key = activeOutputFPs[fp]
             #print '-',key
-            tmp = os.read(fp.fileno(), BUFSIZ)
+            tmp = os.read(fp.fileno(), BUFFER_SIZE)
             n = len(tmp)
             #print 'r',n
             if n > 0:
@@ -491,7 +495,7 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
 
         if pipe.stdin in writeable:
             # figure out how much I can write...
-            hi = min(inbufPtr+BUFSIZ, len(inbuf))
+            hi = min(inbufPtr+MIN_PIPE_BUFFER_SIZE, len(inbuf))
             #print '+','stdin',hi,len(inbuf)
             n = os.write(writeable[0].fileno(), inbuf[inbufPtr:hi])
             #print 'w',n
@@ -513,8 +517,8 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
             break
         else:
             #wait for process to get some output ready
-            #print '?..',
-            time.sleep(0.01)
+            #print '?..'
+            time.sleep(SLEEP_DURATION)
 
     #finished the loop
     TASK_STATS.end(tag)
@@ -603,11 +607,9 @@ def setupFiles(indirList,outdir):
     of input files, and indirs is a parallel list if directories, so the
     i-th mapper reads from indirs[i],infiles[i].  clear the output directory,
     if needed. """
-    print 'setup 1',indirList
     indirs = []
     infiles = []
     for dir in indirList:
-        print 'setup 2',dir
         if GPFileSystem.inGPFS(dir):
             files = FS.listFiles(dir)
         else:

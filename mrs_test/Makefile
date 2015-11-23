@@ -1,5 +1,6 @@
-MRS=python ../mrs_gp_v4.py
-K=3
+#MRS=pypy ../mrs_gp_v4.py
+MRS=pypy ../mrs_gp.py
+K=5
 
 #
 clean: 
@@ -149,12 +150,13 @@ BIG=bigfile1  #100M
 #BIG=bigfile2 #1G
 
 bigfile-times:
+	$(MRS) --serve &
+	sleep 1
 	echo sharding
-	echo $(MRS) --serve &
 	time $(MRS) --task --input $(RAM)/$(BIG) --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
 	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
-	echo $(MRS) --shutdown
+	$(MRS) --shutdown
 
 bigfile-times-ram:
 	echo sharding
