@@ -1,6 +1,7 @@
-#MRS=pypy ../mrs_gp_v4.py
-MRS=pypy ../mrs_gp.py
+MRS=pypy ../mrs_gp_v4.py
+#MRS=pypy ../mrs_gp.py
 K=5
+ASYNC = 0
 
 #
 clean: 
@@ -113,19 +114,19 @@ roundtrip-reshard:
 	sort test/* | sum
 	sort /tmp/test-copy/* | sum
 
-parallel-events.txt: 
+parallel-events: 
 	$(MRS) --serve &
 	sleep 1
 	echo sharding to $(K) shards
 	time  $(MRS) --task --input unsharded --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo training naive bayes in parallel
-	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) \
+	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --async $(ASYNC) \
 		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
 		--reducer 'python sum-events.py'
-	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' 
+	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' --async $(ASYNC)
 	echo export
 	$(MRS) --send '/getmerge?dir=events' > parallel-events.txt
-	echo $(MRS) --shutdown
+	$(MRS) --shutdown
 
 parallel-events-ram: 
 	echo sharding to $(K) shards
@@ -155,7 +156,7 @@ bigfile-times:
 	echo sharding
 	time $(MRS) --task --input $(RAM)/$(BIG) --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo learning
-	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM)
+	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --mapper $(NBCOUNT) --reducer $(SUM) --async $(ASYNC)
 	$(MRS) --shutdown
 
 bigfile-times-ram:

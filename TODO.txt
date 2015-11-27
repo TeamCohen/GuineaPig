@@ -5,6 +5,10 @@ Branching:
  | | | mrs_serve_opt???
 
 TODO for mrs_gp.py:
+ -- mrs_gp_v4 - now has an 'async' mode which is off by default, and leads to v1 algorithm if
+ it's off.  after getting all the buffering right it seems fine, but I will do some tests.
+ some evidence that the --async mode gets deadlocked occasionally.
+
  -- mrs_gp - works with communicate, but only get about a 4x speedup, which maybe isn't that nice.
  possible that it would be better with more asynchronous behavior. 
  -- mrs_gp_v2a.py - clearer way of setting up arrays of pipes and such, but doesn't work

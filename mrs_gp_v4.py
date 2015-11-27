@@ -49,10 +49,15 @@ import urllib
 #  n - stop server: mrs_gp --shutdown
 #
 # Or, you can run map-reduce jobs w/o server by omitting '--task'. 
+#
+# Experimental feature: The option "--async 1" will turn on a more
+# asynchronous version version of the code that monitors a mapper or
+# reducer subprocess, which gives you more ability to monitor
+# progress, but maybe? is less stable.
 ##############################################################################
 
 class MRS(object):
-    VERSION = "1.4.0"
+    VERSION = "1.4.1"
     COPYRIGHT = '(c) William Cohen 2015'
 
 ##############################################################################
@@ -185,18 +190,24 @@ class TaskStats(object):
         self.startTime = {}
         self.endTime = {}
         self.ioSize = {}
-        self.numStarted = {'mapper':0, 'reducer':0}
-        self.numFinished = {'mapper':0, 'reducer':0}
+        self.numStarted = {'mapper':0, 'reducer':0, 'shuffler':0}
+        self.numFinished = {'mapper':0, 'reducer':0, 'shuffler':0}
 
     def start(self,msg):
         """Start timing something."""
         self.ioSize[msg] = {'stdin':0,'stdout':0,'stderr':0}
         self.startTime[msg] = time.time()
+        for k in self.numStarted.keys():
+            if msg.startswith(k): 
+                self.numStarted[k] += 1
         logging.info('started  '+msg)
 
     def end(self,msg):
         """End timing something."""
         self.endTime[msg] = time.time()
+        for k in self.numFinished.keys():
+            if msg.startswith(k): 
+                self.numFinished[k] += 1
         logging.info('finished '+msg + ' in %.3f sec' % (self.endTime[msg]-self.startTime[msg]))
 
     def report(self,includeLogs=True):
@@ -209,10 +220,17 @@ class TaskStats(object):
         for k in sorted(self.numStarted.keys()):
             s = self.numStarted[k]
             f = self.numFinished[k]
+            try:
+                minTime = min(self.endTime[tag]-self.startTime[tag] for tag in self.endTime.keys() if tag.startswith(k))
+                maxTime = max(self.endTime[tag]-self.startTime[tag] for tag in self.endTime.keys() if tag.startswith(k))
+            except ValueError:
+                #empty sequence
+                minTime = maxTime = 0.0
             progressBar = '[*]'
             if s>0:
                 progressBar = "progress [" + ("#"*f) + ("."*(s-f))+"]"
-            buf.extend([' %-7s summary: %d/%d finished/started %s' % (k,self.numFinished[k],self.numStarted[k],progressBar)])
+            buf.extend([' %-7s summary: %d/%d finished/started %s min/max time %.3f/%.3f' % \
+                        (k,self.numFinished[k],self.numStarted[k],progressBar,minTime,maxTime)])
         now = time.time()
         for k in sorted(self.startTime.keys()):
             if k in self.endTime:
@@ -270,6 +288,9 @@ def performTask(optdict):
         TASK_STATS.start('__top level task')
         FS.rmDir("gpfs:_logs")
 
+        #two strategies for managing pipes in parallel are implemented
+        pipeThread = asyncPipeThread if int(optdict.get('--async',"0")) else simplePipeThread
+
         #start parsing options and performing actions...
         if '--input' in optdict:
             indirs = [optdict['--input']]
@@ -281,11 +302,11 @@ def performTask(optdict):
             mapper = optdict.get('--mapper','cat')
             reducer = optdict.get('--reducer','cat')
             numReduceTasks = int(optdict.get('--numReduceTasks','1'))
-            mapreduce(indirs,outdir,mapper,reducer,numReduceTasks)
+            mapreduce(indirs,outdir,mapper,reducer,numReduceTasks,pipeThread)
         else:
             #usage 1: a map-only task has --input, --output, --mapper
             mapper = optdict.get('--mapper','cat')
-            maponly(indirs,outdir,mapper)        
+            maponly(indirs,outdir,mapper,pipeThread)        
         TASK_STATS.end('__top level task')
         FS.write("_history",time.strftime("task-%Y.%m.%H.%M.%S"),"\n".join(TASK_STATS.report(includeLogs=False)))
 
@@ -296,7 +317,7 @@ def key(line):
     """Extract the key for a line containing a tab-separated key,value pair."""
     return line[:line.find("\t")]
 
-def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks):
+def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
     """Run a generic streaming map-reduce process.  The mapper and reducer
     are shell commands, as in Hadoop streaming.  Both indir and outdir
     are directories."""
@@ -326,11 +347,12 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks):
     TASK_STATS.start('_init mappers and shufflers')
     # names of the mapper tasks
     mapTags = map(lambda i:'mapper-from-%s-%s' % (indirs[i],infiles[i]), range(numMapTasks))
+    shuffleTags = map(lambda i:'shuffler-from-%s-%s' % (indirs[i],infiles[i]), range(numMapTasks))
     # subprocesses for each mapper
     mapPipes = map(lambda i:makePipe(mapper), range(numMapTasks))
     # collect stderr of each mapper
     mapErrCollectors = map(lambda i:FileOutputCollector("gpfs:_logs",mapTags[i]),range(numMapTasks))
-    shufflerCollectors = map(lambda i:ShufflingCollector(reduceQs), range(numMapTasks))
+    shufflerCollectors = map(lambda i:ShufflingCollector(shuffleTags[i],reduceQs), range(numMapTasks))
     mapThreads = map(
         lambda i:threading.Thread(target=pipeThread, 
                                   args=(mapTags[i],mapPipes[i],
@@ -361,7 +383,7 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks):
     reduceThreads = map(
         lambda j:threading.Thread(target=pipeThread,
                                   args=(reduceTags[j],reducePipes[j],
-                                        None,outCollectors[j],reduceErrCollectors[j])),
+                                        '',outCollectors[j],reduceErrCollectors[j])),
         range(numReduceTasks))
 
     TASK_STATS.start('_run reducers')
@@ -369,7 +391,7 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks):
     for t in reduceThreads: t.join()
     TASK_STATS.end('_run reducers')
 
-def maponly(indirList,outdir,mapper):
+def maponly(indirList,outdir,mapper,pipeThread):
     """Like mapreduce but for a mapper-only process."""
 
     indirs,infiles = setupFiles(indirList,outdir)
@@ -402,8 +424,9 @@ def maponly(indirList,outdir,mapper):
 ####################
 # pipe threads
 
-BUFFER_SIZE = 32*1024*1024
-SLEEP_DURATION = 0.1
+#params used by makePipe and the asyncPipeThread routine
+BUFFER_SIZE = 512*1024
+SLEEP_DURATION = 0.01
 
 def makePipe(shellCom):
     """Create a subprocess that communicates via stdin, stdout, stderr."""
@@ -412,7 +435,26 @@ def makePipe(shellCom):
                          stderr=subprocess.PIPE)
     return p
 
-def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
+def simplePipeThread(tag,pipe,inbuf,outCollector,errCollector):
+    logging.info('starting simple pipe')
+
+    global TASK_STATS
+    TASK_STATS.start(tag)
+    TASK_STATS.ioSize[tag]['stdin'] = len(inbuf)
+    #this actually runs the subprocess
+    (outbuf,errbuf) = pipe.communicate(input=inbuf)    
+    TASK_STATS.ioSize[tag]['stdout'] = len(outbuf)
+    TASK_STATS.ioSize[tag]['stderr'] = len(errbuf)
+    errCollector.collect(errbuf)
+    errCollector.close()
+    #we'll call this the end of this thread - if sending the output
+    #along is complex, then the collector should declare another
+    #process
+    TASK_STATS.end(tag)
+    outCollector.collect(outbuf)
+    outCollector.close()
+
+def asyncPipeThread(tag,pipe,inbuf,outCollector,errCollector):
     """A thread that communicates with a subprocess pipe produced by
     makePipe.  This is an asynchronous version of the
     popen.communicate() method. Tag is a name for the pipe, inbuf is a
@@ -447,7 +489,11 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
     # process compute.
 
     #the active inputs and outputs of the pipe
-    activeInputs = [pipe.stdin] if inbuf!=None else []
+    if inbuf:
+        activeInputs = [pipe.stdin] 
+    else:
+        pipe.stdin.close()
+        activeInputs = []         
     activeOutputFPs = {pipe.stdout:'stdout',pipe.stderr:'stderr'}
     collectors = {'stdout':outCollector, 'stderr':errCollector}
     #the part of inbuf previously written is always inbuf[:inbufPtr]
@@ -455,15 +501,10 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
     # how much to send at a time to the pipe, this is guaranteed by
     # posix, for some reason select.PIPE_BUF doesn't seem to exist
     MIN_PIPE_BUFFER_SIZE = min(512,BUFFER_SIZE)
-
     global TASK_STATS
+
+    logging.info('starting asynchronous pipe')
     TASK_STATS.start(tag)
-
-    for k in TASK_STATS.numStarted.keys():
-        #tag starts with 'mapper' or 'reducer'
-        if tag.startswith(k): 
-            TASK_STATS.numStarted[k] += 1
-
     while True:
 
 #        print 'stdin',inbufPtr,'stdout',len(result['stdout'].getvalue()), \
@@ -522,12 +563,6 @@ def pipeThread(tag,pipe,inbuf,outCollector,errCollector):
 
     #finished the loop
     TASK_STATS.end(tag)
-    for k in TASK_STATS.numStarted.keys():
-        if tag.startswith(k): 
-            TASK_STATS.numFinished[k] += 1
-    #print 'finished loop'
-
-# used with pipeThread's
 
 class PipeOutputCollector(object):
     """Abstract class used for collected output of a pipe."""
@@ -559,27 +594,57 @@ class FileOutputCollector(PipeOutputCollector):
             self.fp.close()
 
 class ShufflingCollector(PipeOutputCollector):
-    """Collector writing to reducer queues."""
-    def __init__(self,reduceQs):
+    """A collector for writing shuffled output to reducer queues."""
+
+    def __init__(self,tag,reduceQs):
+        self.firstCollection = True
+        self.tag = tag
         self.reduceQs = reduceQs
         self.numReduceTasks = len(reduceQs)
-        # leftover is anything that followed the last newline in the
-        # most recently collected string
+        # buffer what goes into the reducer queues, since they seem
+        # very slow with lots of little inputs
+        self.buffers = map(lambda i:cStringIO.StringIO(), reduceQs)
+        # 'leftover' is anything that followed the last newline in the
+        # most recently collected string - only happens when
+        # this is called asynchronously
         self.leftover = ''
+
     def collect(self,str):
-        # first break the string into lines
-        lines = (self.leftover + str).split("\n")
-        self.leftover = lines[-1] #will be '' if str ends with newline
-        for line0 in lines[:-1]:
-            #send each line to appropriate reducer 
-            line = line0 + "\n"
-            k = key(line)
-            self.reduceQs[hash(k)%self.numReduceTasks].put(line)
+
+        global TASK_STATS
+        if self.firstCollection:
+            #note that we've started
+            TASK_STATS.start(self.tag)
+            self.firstCollection = False
+        # optimize - don't copy str if we don't need to 
+        lines = (self.leftover + str) if self.leftover else str
+        #loop through each line and shuffle it to the right location
+        lastNewline = 0
+        while True:
+            nextNewline = lines.find("\n",lastNewline)
+            if nextNewline<0: 
+                # no more complete lines
+                self.leftover = lines[lastNewline:]
+                break
+            else:
+                line = lines[lastNewline:nextNewline+1]
+                TASK_STATS.ioSize[self.tag]['stdin'] += len(line)
+                k = key(line)
+                #self.reduceQs[hash(k)%self.numReduceTasks].put(line)
+                self.buffers[hash(k)%self.numReduceTasks].write(line)
+                lastNewline = nextNewline+1
+
     def close(self):
         assert not self.leftover, "collected data wasn't linefeed-terminated"
-        # send 'done' signal ("poison") to all queues
-        for q in self.reduceQs:
-            q.put(None)
+        global TASK_STATS
+        for i in range(len(self.reduceQs)):
+            # send the buffered-up data for the i-th queue
+            bufi =  self.buffers[i].getvalue()
+            self.reduceQs[i].put(bufi)
+            TASK_STATS.ioSize[self.tag]['stdout'] += len(bufi)
+            # signal we're done with this queue
+            self.reduceQs[i].put(None)
+        TASK_STATS.end(self.tag)
 
 ####################
 # used with reducer queues
@@ -596,8 +661,7 @@ def acceptReduceInputs(numMapTasks,reduceQ,reducePipe):
         else:
             #some mapper has indicated that it's finished
             numPoison += 1
-    #now all mappers are finished
-    reducePipe.stdin.close()
+    #now all mappers are finished so we can exit
 
 ####################
 # access input/output files for mapreduce
@@ -798,13 +862,13 @@ class MRSHandler(BaseHTTPRequestHandler):
         else:
             return it
 
+#incantations for setting up a multi-threaded server
 class ThreadingServer(ThreadingMixIn, HTTPServer):
     pass
 
 def runServer():
-    #allow only access from local machine
-    #server_address = ('127.0.0.1', 1969)
-    #allow access from anywhere
+    #to allow only access from local machine, use server_address = ('127.0.0.1', 1969)
+    #thid will allow access from anywhere....
     server_address = ('0.0.0.0', 1969)    
     httpd = ThreadingServer(server_address, MRSHandler)
     startMsg = 'http server started on http://%s:%d/ls&html=1 at %s' % (httpd.server_name,1969,time.strftime('%X %x'))
@@ -819,6 +883,7 @@ def runServer():
 import httplib
  
 def sendRequest(command,quiet=False,timeout=None):
+    """Send a request to the server."""
     http_server = "127.0.0.1:1969"
     conn = httplib.HTTPConnection(http_server,timeout=timeout)
     conn.request("GET", command)
@@ -833,6 +898,7 @@ def sendRequest(command,quiet=False,timeout=None):
         raise Exception('%d %s' % (response.status,response.reason))
 
 def serverIsResponsive():
+    """Check if the server is up, return True/False"""
     try:
         sendRequest("/ls",quiet=True,timeout=1)
         return True
@@ -866,10 +932,11 @@ def usage():
     print "Note 1: DIRs which start with gpfs: will be stored in-memory on the server"
     print "Note 2: You can run tasks locally, not on the server by omitting --task, if gpfs: is not used"
     print "Note 3: You can replace '--input DIR' with '--inputs DIR1,DIR2,....' ie, a comma-separated list of DIRS"
+    print "Note 4: The experimental '--async 1' option is less well-tested but maybe gives better monitoring."
 
 if __name__ == "__main__":
 
-    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report", "probe",
+    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report", "probe", "async=",
                "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "inputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
