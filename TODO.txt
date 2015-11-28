@@ -1,7 +1,7 @@
 Branching:
  master
  | mrs
- | | mrs_serve
+ | | mrs_serve - now merged with master
 
 mrs_gp1_0.py - is the initial version, works with communicate, but
 only get about a 4x speedup, which maybe isn't that nice.  possible
@@ -29,6 +29,8 @@ FUNCTIONALITY - to add
 
 to add:
  - MapPartitions(iteratorGenerator): iteratorGenerator(inputIterator) returns an iterator over mapped items
+ - add ComputedView(fun=f, shell=sh, inputs=[], ship=[]) --- just invokes a python/shell command....do I need any of the
+ StreamingMapReduce stuff below if I add this? I guess if I will allow optimizations....
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', sideviews=..., shipping=[f1,..,fk]) 
  -- opt(1) 
  --- define class StreamingMapReduce(MapReduce): stores the commands
