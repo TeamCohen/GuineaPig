@@ -15,7 +15,7 @@ tar: update
 upload: tar
 	scp tutorial.tgz raff.ml.cmu.edu:~/afs-home/www/10-605/gpigtut.tgz
 
-all-runs: run-wordcount run-ntup-wordcount run-prefcount run-wordcmp run-wordprob run-multi run-phirl run-reuse check-phirl
+all-runs: run-wordcount run-ntup-wordcount run-prefcount run-wordcmp run-wordprob run-multi run-phirl run-reuse check-phirl run-add-ids
 	echo all tests run, did you see any problems\?
 
 run-wordcount:
@@ -65,6 +65,10 @@ run-phirl:
 	sort -gr gpig_views/look.gp | head
 	sort -g gpig_views/look.gp | head
 
+run-add-ids:
+	python add-ids.py --store result
+	tail -3  gpig_views/result.gp
+	python add-ids.py --cat count
 
 run-reuse:
 	rm -f gpig_views/*.gp*

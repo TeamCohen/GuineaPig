@@ -77,7 +77,19 @@ def aPlanner():
     p.augA = Augment(p.yA, sideview=p.yD, loadedBy=lambda v:GPig.onlyRowOf(v))
     p.hiLo = p.augA | ReplaceEach(by=lambda(a,d):1 if a>d else -1)
 
+    #union
     p.uab = Union(p.yA,p.yD)
+
+    #ReplaceEachPartition
+    def adderUpper():
+        def f(lines):
+            tot = 0
+            for line in lines:
+                tot += int(line.strip())
+                yield tot
+        return f
+
+    p.totA = ReadLines('data/xA.txt') | ReplaceEachPartition(by=adderUpper())
 
     p.setup()
     return p
@@ -143,6 +155,12 @@ class Test(unittest.TestCase):
     def testUnion(self):
         print 'TEST: Union'
         self.checkExact(self.p, 'uab', list(range(10)))
+
+    def testReplaceEachPartition(self):
+        print 'TEST: ReplaceEachPartition'
+        r = [0,1,2,3,4,6,7,8,9]
+        totr = map(lambda i:sum(r[0:i]), range(1,10))
+        self.checkExact(self.p, 'totA', totr)
 
     def checkEquiv(self,p,viewName,expected):
         v = p.getView(viewName)

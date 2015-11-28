@@ -28,7 +28,6 @@ ROBUSTNESS/ERRORS/DOCS:
 FUNCTIONALITY - to add
 
 to add:
- - MapPartitions(iteratorGenerator): iteratorGenerator(inputIterator) returns an iterator over mapped items
  - add ComputedView(fun=f, shell=sh, inputs=[], ship=[]) --- just invokes a python/shell command....do I need any of the
  StreamingMapReduce stuff below if I add this? I guess if I will allow optimizations....
  - add StreamingMapReduce(view1, mapper='shell command', reducer='shell command', combiner='shell command', sideviews=..., shipping=[f1,..,fk]) 

@@ -24,7 +24,7 @@ class GPig(object):
     SORT_COMMAND = 'LC_COLLATE=C sort'  # use standard ascii ordering, not locale-specific one
     HADOOP_LOC = 'hadoop'               # assume hadoop is on the path at planning time
     MY_LOC = 'guineapig.py'             # the name of this file
-    VERSION = '1.3.4'
+    VERSION = '1.3.5'
     COPYRIGHT = '(c) William Cohen 2014,2015'
 
     #Global options for Guinea Pig can be passed in with the --opts
@@ -549,6 +549,28 @@ class ReplaceEach(Transformation):
 
 class Map(ReplaceEach):
     """ Alternate name for ReplaceEach"""
+
+class ReplaceEachPartition(Transformation):
+    """In 'by=f', f is a python function that takes an iterator over rows
+    and yields a sequence of replacements.
+    """
+    
+    def __init__(self,inner=None,by=lambda x:x):
+        Transformation.__init__(self,inner)
+        self.replaceBy = by
+
+    def rowGenerator(self):
+        for replacementRow in self.replaceBy(self.inner.rowGenerator()):
+            yield replacementRow
+
+    def explanation(self):
+        return self.inner.explanation() + [ 'replacePartitions to %s' % self.tag ]
+
+    def __str__(self):
+        return 'ReplaceEachPartition(%s, by=%s)' % (View.asTag(self.inner),str(self.replaceBy)) + self.showExtras()
+
+class MapPartitions(ReplaceEachPartition):
+    """Alternate name for ReplaceEachPartition."""
 
 class Augment(Transformation):
 
