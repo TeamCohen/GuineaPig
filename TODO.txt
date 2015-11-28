@@ -8,34 +8,21 @@ TODO for mrs_gp.py:
  -- mrs_gp_v4 - now has an 'async' mode which is off by default, and leads to v1 algorithm if
  it's off.  after getting all the buffering right it seems fine, but I will do some tests.
  some evidence that the --async mode gets deadlocked occasionally.
-
  -- mrs_gp - works with communicate, but only get about a 4x speedup, which maybe isn't that nice.
  possible that it would be better with more asynchronous behavior. 
- -- mrs_gp_v2a.py - clearer way of setting up arrays of pipes and such, but doesn't work
- -- mrs_gp_v3.py - my own more asynchronous version of _communicate, which seems to work,
- but the wrapper code doesn't exploit the asynchronous behavior
- -- mrs_gp_v2.py - trying to clean up mrs_gp_v3.py and make it more asynchronous - but it doesn't
- actually work anymore :-(
- -- mrs_gp_v4.py - cleaned up version which uses asynchronous communication.  
- seems ok for small problems but there is way too much overhead....only about 5% of the time
- is spent. 
 
-ALSO: reduce tasks are all done sequentially, starting with the last one....for both v1 and v4???
-
- -- monitor mapper/reducer/shuffler min-max-avg
- -- server timeout, for security, in case I leave it running...?
  -- restrict opened files to a subdirectory - "./" + foo 
- -- add an 'abort task' method for server...? or maybe kill client thread?
  -- test with gpig, test on processes with errors, ....
  -- os.times() - can this show children's time/CPU pct so I can see actual load?
- -- optimize: can reducerQ write directly to reduce processes, rather than 
-    buffering their inputs? can we write incrementally to/from mappers?
-    would either help much? the mappers seem to start pretty quick,
-    and the reducer will need to buffer up data in the sort....
- --- multiple map inputs, for joins --inputs dir1,dir2,...
  --- --port option
- --- reporting: subprocess io progress? pid status?  
  --- check if input file is a directory or not, and write to a file, not directory, if --numReduceTasks = 1
+
+ -- monitor mapper/reducer/shuffler min-max-avg DONE
+ --- multiple map inputs, for joins --inputs dir1,dir2,... DONE
+
+ -- server timeout, for security, in case I leave it running...?
+ -- add an 'abort task' method for server...? or maybe kill client thread?
+ --- reporting: subprocess io progress? pid status?  
 
 ROBUSTNESS/ERRORS/DOCS:
  - writeup smallvoc-tfidf.py as an example
