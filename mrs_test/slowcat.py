@@ -1,3 +1,5 @@
+# cat with delays, for testing
+
 import sys
 import time
 import logging

@@ -1,3 +1,5 @@
+# cat command that also produced stderr output, for testing
+
 import sys
 import time
 import logging

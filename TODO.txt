@@ -2,27 +2,21 @@ Branching:
  master
  | mrs
  | | mrs_serve
- | | | mrs_serve_opt???
+
+mrs_gp1_0.py - is the initial version, works with communicate, but
+only get about a 4x speedup, which maybe isn't that nice.  possible
+that it would be better with more asynchronous behavior.  mrs_gp.py is
+the working version.
 
 TODO for mrs_gp.py:
- -- mrs_gp_v4 - now has an 'async' mode which is off by default, and leads to v1 algorithm if
- it's off.  after getting all the buffering right it seems fine, but I will do some tests.
- some evidence that the --async mode gets deadlocked occasionally.
- -- mrs_gp - works with communicate, but only get about a 4x speedup, which maybe isn't that nice.
- possible that it would be better with more asynchronous behavior. 
-
- -- restrict opened files to a subdirectory - "./" + foo 
- -- test with gpig, test on processes with errors, ....
- -- os.times() - can this show children's time/CPU pct so I can see actual load?
- --- --port option
- --- check if input file is a directory or not, and write to a file, not directory, if --numReduceTasks = 1
-
- -- monitor mapper/reducer/shuffler min-max-avg DONE
- --- multiple map inputs, for joins --inputs dir1,dir2,... DONE
-
- -- server timeout, for security, in case I leave it running...?
- -- add an 'abort task' method for server...? or maybe kill client thread?
- --- reporting: subprocess io progress? pid status?  
+ - restrict opened files to a subdirectory - "./" + foo, forbid ".." 
+ - add --port option, default port 8000?
+ - check if input file is a directory or not, and write to a file, not directory, if --numReduceTasks = 1,
+   so it can be used with regular gp
+ - test with gpig, test on processes with errors, ....
+ - os.times() - can this show children's time/CPU pct so I can see actual load?
+ - server timeout, for security, in case I leave it running...?
+ - add an 'abort task' method for server...? or maybe kill client thread?
 
 ROBUSTNESS/ERRORS/DOCS:
  - writeup smallvoc-tfidf.py as an example

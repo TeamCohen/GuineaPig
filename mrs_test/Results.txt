@@ -1,0 +1,58 @@
+Tue Nov 10 13:26:28 EST 2015
+
+pypy/gpfs		
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+SUM='python sum-events.py'
+input $(RAM)bigfile1 (100M)
+
+		  v1			  v4:async.0	 v4:async.1
+K	    shard	learn		shard	learn  	shard	learn  	     
+baseline    -		400.238		
+1	    2.4		451.168		4.63	440.69	4.64	450.20
+3	    6.157	177.777		4.64	160.97	4.67	153.49
+5	    6.418	129.893		4.60	108.89	4.52	 97.79
+10	    8.775	100.084		4.84	 89.75	5.08	 80.28
+15	    14.519	 99.501		5.08	 73.18	5.26	 82.85
+20	    14.733 	107.746		5.36	 69.64	5.03	 83.94
+30	    10.358	128.072		5.68	 81.27	5.86	 87.38
+60	    -		-		
+
+pypy/ramdisk
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+SUM='python sum-events.py'
+input $(RAM)bigfile1 (100M)
+
+1
+3
+5	    6.41	131.69
+10	    7.04	100.13
+15	    7.62	102.40
+20
+30	    10.25	121.35
+
+pypy/ramdisk
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+SUM='python sum-events.py'
+input $(RAM)bigfile2 (1Gb)
+
+k     shard	     learn
+
+baseline
+3     
+5     
+10    
+20    
+
+pypy/server
+NBCOUNT='python streamNaiveBayesLearner.py --streamTrain 100'
+SUM='python sum-events.py'
+input $(RAM)bigfile2 (1Gb)
+
+k     shard	learn
+
+1     
+3     
+5     
+10    
+20    
+
