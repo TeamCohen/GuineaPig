@@ -1,6 +1,6 @@
 update:
 	cp ../emr-extras/*-sample.sh
-	cp ../guineapig.py  .
+	cp ../guineapig.py ../mrs_gp.py ../gpextras.py .
 
 clean:
 	rm -rf gpig_views

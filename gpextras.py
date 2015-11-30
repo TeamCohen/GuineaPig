@@ -91,7 +91,7 @@ class MRSCompiler(MRCompiler):
     """
 
     def __init__(self):
-        self.mrs_loc = 'mrs_gp'
+        self.mrsCommand = os.environ.get('GP_MRS_COMMAND','mrs_gp')
 
     def distributeCommands(self,task,gp,maybeRemoteCopy,localCopy):
         """Distribute the remote copy to the local directory."""
@@ -100,13 +100,13 @@ class MRSCompiler(MRCompiler):
     def simpleMapCommands(self,task,gp,mapCom,src,dst):
         """A map-only job with zero or one inputs."""
         assert src,'undefined src for this view? you may be using Wrap with target:mrs'
-        return [ "%s --input %s --output %s --mapper '%s'" % (self.mrs_loc,src,dst,mapCom) ]
+        return [ "%s --input %s --output %s --mapper '%s'" % (self.mrsCommand,src,dst,mapCom) ]
         
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
         """A map-reduce job with one input."""
         p = task.reduceParallel(gp)
         return [ "%s --input %s --output %s --mapper '%s'  --numReduceTasks %d --reducer '%s'" \
-                 % (self.mrs_loc,src,dst,mapCom,p,reduceCom) ]
+                 % (self.mrsCommand,src,dst,mapCom,p,reduceCom) ]
 
     def joinCommands(self,task,gp,mapComs,reduceCom,srcs,midpoint,dst):
         """A map-reduce job with several inputs."""
@@ -115,8 +115,8 @@ class MRSCompiler(MRCompiler):
         subplan = []
         for i in range(len(srcs)):
             subplan.append("%s --input %s --output %s --mapper '%s'" \
-                           % (self.mrs_loc,srcs[i],mid(i),mapComs[i]))
+                           % (self.mrsCommand,srcs[i],mid(i),mapComs[i]))
         allMidpoints = ",".join([mid(i) for i in range(len(srcs))])
         subplan.append("%s --inputs %s --output %s --mapper cat --numReduceTasks %d --reducer '%s'" \
-                       % (self.mrs_loc,allMidpoints,dst,p,reduceCom))
+                       % (self.mrsCommand,allMidpoints,dst,p,reduceCom))
         return subplan

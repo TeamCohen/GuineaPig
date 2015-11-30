@@ -685,14 +685,21 @@ def setupFiles(indirList,outdir,numReduceTasks):
     could also contains only files.  In this case, if there is a
     single output, it will also be a file.
     """
+    #clear space/make directory for output, if necessary
+    if os.path.exists(outdir):
+        logging.warn('removing %s' % (outdir))
+        shutil.rmtree(outdir)
+
     indirs = []
     infiles = []
     outputToFile = False
     if all(os.path.isfile(f) for f in indirList): 
+        #ok if all inputs are files...
         for f in indirList:
             inhead,intail = os.path.split(f)
             indirs.append(inhead)
             infiles.append(intail)
+        #and if they are and there's one non-GPFS output, make that a file too
         if (numReduceTasks==1 or (numReduceTasks==-1 and len(indirList)==1)) and not GPFileSystem.inGPFS(outdir):
             #if there's one output, and all inputs are files, then make the output a file also
             outhead,outtail = os.path.split(outdir)
@@ -700,6 +707,7 @@ def setupFiles(indirList,outdir,numReduceTasks):
             outfiles=[outtail]
             outputToFile = True
     else:
+        #collect all the input files
         for dir in indirList:
             if GPFileSystem.inGPFS(dir):
                 files = FS.listFiles(dir)
@@ -709,18 +717,14 @@ def setupFiles(indirList,outdir,numReduceTasks):
                 assert False,'illegal input location %s' % dir
             infiles.extend(files)
             indirs.extend([dir] * len(files))
-    #clear space/make directory for output, if necessary
-    if os.path.exists(outdir):
-        logging.warn('removing %s' % (outdir))
-        shutil.rmtree(outdir)
     if not outputToFile:
         os.makedirs(outdir)
-    # construct the list of output files
-    if numReduceTasks == -1:
-        outfiles = infiles
-    else:
-        outfiles = map(lambda j:'part04%d' % j, range(numReduceTasks))
-    outdirs = [outdir]*len(outfiles)
+        # construct the list of output files
+        if numReduceTasks == -1:
+            outfiles = infiles
+        else:
+            outfiles = map(lambda j:'part%04d' % j, range(numReduceTasks))
+        outdirs = [outdir]*len(outfiles)
     return indirs,infiles,outdirs,outfiles
                       
 def getInput(indir,f):
