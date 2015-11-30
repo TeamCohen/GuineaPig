@@ -117,6 +117,6 @@ class MRSCompiler(MRCompiler):
             subplan.append("%s --input %s --output %s --mapper '%s'" \
                            % (self.mrs_loc,srcs[i],mid(i),mapComs[i]))
         allMidpoints = ",".join([mid(i) for i in range(len(srcs))])
-        subplan.append("%s --joinInputs %s --output %s --mapper cat --numReduceTasks %d --reducer '%s'" \
+        subplan.append("%s --inputs %s --output %s --mapper cat --numReduceTasks %d --reducer '%s'" \
                        % (self.mrs_loc,allMidpoints,dst,p,reduceCom))
         return subplan

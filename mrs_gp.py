@@ -26,7 +26,7 @@ import urllib
 # multi-processing.
 #
 # TODO:
-#  documennt --inputs
+#  document --inputs
 #  test/eval on servers and with gp
 #
 # Gotchas/bugs:
@@ -302,11 +302,8 @@ def performTask(optdict):
         outdir = optdict['--output']
         #for security, disallow any access to files above the
         #directory in which the main process (eg server) is running
-        for d in indirs: assert d.find("..")<0, "unsafe input directory '"+d+"'"
-        assert outdir.find(".."),"unsafe output directory '"+outdir+"'"
-        indirs = map(lambda d:"./"+d, indirs)
-        outdir = "./"+outdir
-        
+        for d in indirs+[outdir]: assert d.find("..")<0, "unsafe input directory '"+d+"'"
+
         if '--reducer' in optdict:
             #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
             mapper = optdict.get('--mapper','cat')
@@ -332,9 +329,10 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
     are shell commands, as in Hadoop streaming.  Both indir and outdir
     are directories."""
 
-    #infiles is a list of input files, and indirs is a parallel list if
-    #directories, so the i-th mapper reads from indirs[i],infiles[i]
-    indirs,infiles,outputToFile = setupFiles(indirList,outdir,numReduceTasks)
+    #indirs[i],infiles[i] is the i-th input
+    #outdirs[j],outfiles[i] is the i-th output
+    indirs,infiles,outdirs,outfiles = setupFiles(indirList,outdir,numReduceTasks)
+
     numMapTasks = len(infiles)
     global TASK_STATS
 
@@ -343,15 +341,8 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
 
     TASK_STATS.start('_init reducers and queues')
     #where to output the results
-    if outputToFile:
-        assert numReduceTasks==1
-        head,tail = os.path.split(outdir)
-        outdir = head
-        reduceOutputs = [tail]
-    else:
-        reduceOutputs = map(lambda j:'part%04d' % j, range(numReduceTasks))
     #names of the reduce tasks
-    reduceTags = map(lambda j:'reducer-to-%s-%s' % (outdir,reduceOutputs[j]), range(numReduceTasks))
+    reduceTags = map(lambda j:'reducer-to-%s-%s' % (outdirs[j],outfiles[j]), range(numReduceTasks))
     reduceQs = map(lambda j:Queue.Queue(), range(numReduceTasks))
     reducePipes = map(lambda j:makePipe("sort -k1,2 | "+reducer), range(numReduceTasks))
     reduceQThreads = map(
@@ -396,7 +387,7 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
         lambda j:FileOutputCollector("gpfs:_logs",reduceTags[j]),
         range(numReduceTasks))
     outCollectors = map(
-        lambda j:FileOutputCollector(outdir,reduceOutputs[j]), 
+        lambda j:FileOutputCollector(outdirs[j],outfiles[j]),
         range(numReduceTasks))
     reduceThreads = map(
         lambda j:threading.Thread(target=pipeThread,
@@ -412,26 +403,18 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
 def maponly(indirList,outdir,mapper,pipeThread):
     """Like mapreduce but for a mapper-only process."""
 
-    indirs,infiles,outputToFile = setupFiles(indirList,outdir,-1)
+    indirs,infiles,outdirs,outfiles = setupFiles(indirList,outdir,-1)
     global TASK_STATS
 
     numMapTasks = len(infiles)
     # mapper output locations
-    if outputToFile:
-        assert len(infiles)==1
-        head,tail = os.path.split(outdir)
-        outdir = head
-        mapOutputs = [tail]
-    else:
-        mapOutputs = map(lambda i:'part%04d' % i, range(numMapTasks))        
-    #names of the map tasks
     mapTags = map(lambda i:'mapper-from-%s-%s' % (indirs[i],infiles[i]), range(numMapTasks))
     # subprocesses for each mapper
     mapPipes = map(lambda i:makePipe(mapper), range(numMapTasks))
     # collect stderr of each mapper
     errCollectors = map(lambda i:FileOutputCollector("gpfs:_logs",mapTags[i]),range(numMapTasks))
     # collect outputs of mappers
-    outCollectors = map(lambda i:FileOutputCollector(outdir,mapOutputs[i]), range(numMapTasks))
+    outCollectors = map(lambda i:FileOutputCollector(outdirs[i],outfiles[i]), range(numMapTasks))
     # threads for each mapper
     mapThreads = map(
         lambda i:threading.Thread(target=pipeThread, 
@@ -461,7 +444,6 @@ def makePipe(shellCom):
     return p
 
 def simplePipeThread(tag,pipe,inbuf,outCollector,errCollector):
-    logging.info('starting simple pipe')
 
     global TASK_STATS
     TASK_STATS.start(tag)
@@ -528,7 +510,6 @@ def asyncPipeThread(tag,pipe,inbuf,outCollector,errCollector):
     MIN_PIPE_BUFFER_SIZE = min(512,BUFFER_SIZE)
     global TASK_STATS
 
-    logging.info('starting asynchronous pipe')
     TASK_STATS.start(tag)
     while True:
 
@@ -607,7 +588,7 @@ class FileOutputCollector(PipeOutputCollector):
             self.outdir = outdir
             self.outfile = outfile
         else:
-            self.fp = open(os.path.join(outdir,outfile),'w')
+            self.fp = open(os.path.join("./"+outdir,outfile),'w')
     def collect(self,str):
         if self.gpfs: 
             global FS
@@ -692,57 +673,68 @@ def acceptReduceInputs(numMapTasks,reduceQ,reducePipe):
 # access input/output files for mapreduce
 
 def setupFiles(indirList,outdir,numReduceTasks):
-    """Returns a triple (indirs,infiles,outputToFileFlag), where indirs
-    and infiles are parallel lists: infiles is a list of input files,
-    and indirs is a parallel list if directories, so the i-th mapper
-    reads from indirs[i]/infiles[i].  Normally outputToFileFlag is
-    false, and the output directory will be created and cleared, if
-    necessary.  However, if the inputs are all files and
-    numReduceTasks is 1, then instead of creating a directory to hold
-    the outputs, output will be written to a file named 'outdir'.
+    """Return two parallel lists, indirs and infiles and outdirs and
+    outfiles, so that indirs[i]/infiles[i] is the i-th input, and
+    outdirs[j]/outfiles[j] is the j-th output.  The number of outputs
+    is determined by numReduceTasks: if it is -1, then this is
+    interpreted as a map-only task, and the number of outputs is the
+    same as the number of inputs.
+
+    Generally indirList is a list of directories or GPFS dirs, and the
+    input files are the contents of those directories.  But indirList
+    could also contains only files.  In this case, if there is a
+    single output, it will also be a file.
     """
     indirs = []
     infiles = []
-    if numReduceTasks<0: oneReduceTaskAndInputsAreFiles = (len(indirList)==1)
-    else: oneReduceTaskAndInputsAreFiles = (numReduceTasks==1)
-    for dir in indirList:
-        if GPFileSystem.inGPFS(dir):
-            files = FS.listFiles(dir)
-            oneReduceTaskAndInputsAreFiles = False
-        elif os.path.isdir(dir):
-            files = [f for f in os.listdir(dir)]
+    outputToFile = False
+    if all(os.path.isfile(f) for f in indirList): 
+        for f in indirList:
+            inhead,intail = os.path.split(f)
+            indirs.append(inhead)
+            infiles.append(intail)
+        if (numReduceTasks==1 or (numReduceTasks==-1 and len(indirList)==1)) and not GPFileSystem.inGPFS(outdir):
+            #if there's one output, and all inputs are files, then make the output a file also
+            outhead,outtail = os.path.split(outdir)
+            outdirs=[outhead]
+            outfiles=[outtail]
+            outputToFile = True
+    else:
+        for dir in indirList:
+            if GPFileSystem.inGPFS(dir):
+                files = FS.listFiles(dir)
+            elif os.path.isdir(dir):
+                files = [f for f in os.listdir(dir)]
+            else:
+                assert False,'illegal input location %s' % dir
             infiles.extend(files)
             indirs.extend([dir] * len(files))
-            oneReduceTaskAndInputsAreFiles = False
-        elif os.path.isfile(dir):
-            head,tail = os.path.split(dir)
-            indirs.append(head)
-            infiles.append(tail)
-        else:
-            assert False,"cannot handle input directory %s" % dir
-    if outdir.startswith("gpfs:"):
-        FS.rmDir(outdir)
+    #clear space/make directory for output, if necessary
+    if os.path.exists(outdir):
+        logging.warn('removing %s' % (outdir))
+        shutil.rmtree(outdir)
+    if not outputToFile:
+        os.makedirs(outdir)
+    # construct the list of output files
+    if numReduceTasks == -1:
+        outfiles = infiles
     else:
-        if not oneReduceTaskAndInputsAreFiles:
-            if os.path.exists(outdir):
-                logging.warn('removing %s' % (outdir))
-                shutil.rmtree(outdir)
-            os.makedirs(outdir)
-    return indirs,infiles,oneReduceTaskAndInputsAreFiles
+        outfiles = map(lambda j:'part04%d' % j, range(numReduceTasks))
+    outdirs = [outdir]*len(outfiles)
+    return indirs,infiles,outdirs,outfiles
                       
 def getInput(indir,f):
-    """Return the content of the input file at indir/f"""
+    """Return the content of the input file at indir/f.  Indir could also
+    be on GPFS.
+    """
     if GPFileSystem.inGPFS(indir):
         return FS.cat(indir,f)
     else:
-        logging.debug('loading lines from '+indir+"/"+f)
         inputString = cStringIO.StringIO()
         k = 0
-        for line in open(os.path.join(indir,f)):
+        for line in open("./"+os.path.join(indir,f)):
             inputString.write(line)
             k += 1
-            if k%10000==0: logging.debug('reading %d lines from file %s/%s' % (k,indir,f))
-        logging.debug('finished transferring from '+indir+"/"+f)
         return inputString.getvalue()
 
 ##############################################################################
