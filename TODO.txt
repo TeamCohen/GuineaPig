@@ -9,10 +9,12 @@ that it would be better with more asynchronous behavior.  mrs_gp.py is
 the working version.
 
 TODO for mrs_gp.py:
- - restrict opened files to a subdirectory - "./" + foo, forbid ".." 
- - add --port option, default port 8000?
+ - restrict opened files to a subdirectory - "./" + foo, forbid ".."  -done
+ - add --port option, default port 8000? -done
  - check if input file is a directory or not, and write to a file, not directory, if --numReduceTasks = 1,
    so it can be used with regular gp
+   - done, but should probably clean up and put the final-output list creation into setupFiles
+
  - test with gpig, test on processes with errors, ....
  - os.times() - can this show children's time/CPU pct so I can see actual load?
  - server timeout, for security, in case I leave it running...?

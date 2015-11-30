@@ -7,6 +7,7 @@ import collections
 import getopt
 import logging
 import os
+import os.path
 import Queue
 import select
 import shutil
@@ -286,17 +287,26 @@ def performTask(optdict):
         TASK_STATS = TaskStats(optdict)
         
         TASK_STATS.start('__top level task')
+        #the log directory is error logs for the most recent top-level
+        #task only
         FS.rmDir("gpfs:_logs")
 
         #two strategies for managing pipes in parallel are implemented
         pipeThread = asyncPipeThread if int(optdict.get('--async',"0")) else simplePipeThread
 
-        #start parsing options and performing actions...
+        #parse input and output directories
         if '--input' in optdict:
             indirs = [optdict['--input']]
         elif '--inputs' in optdict:
             indirs = optdict['--inputs'].split(",")
         outdir = optdict['--output']
+        #for security, disallow any access to files above the
+        #directory in which the main process (eg server) is running
+        for d in indirs: assert d.find("..")<0, "unsafe input directory '"+d+"'"
+        assert outdir.find(".."),"unsafe output directory '"+outdir+"'"
+        indirs = map(lambda d:"./"+d, indirs)
+        outdir = "./"+outdir
+        
         if '--reducer' in optdict:
             #usage 1: a basic map-reduce has --input, --output, --mapper, --reducer, and --numReduceTasks
             mapper = optdict.get('--mapper','cat')
@@ -324,7 +334,7 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
 
     #infiles is a list of input files, and indirs is a parallel list if
     #directories, so the i-th mapper reads from indirs[i],infiles[i]
-    indirs,infiles = setupFiles(indirList,outdir)
+    indirs,infiles,outputToFile = setupFiles(indirList,outdir,numReduceTasks)
     numMapTasks = len(infiles)
     global TASK_STATS
 
@@ -332,7 +342,15 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
     # is a buffer bj, which contains lines for shard K,
 
     TASK_STATS.start('_init reducers and queues')
-    reduceOutputs = map(lambda j:'part%04d' % j, range(numReduceTasks))
+    #where to output the results
+    if outputToFile:
+        assert numReduceTasks==1
+        head,tail = os.path.split(outdir)
+        outdir = head
+        reduceOutputs = [tail]
+    else:
+        reduceOutputs = map(lambda j:'part%04d' % j, range(numReduceTasks))
+    #names of the reduce tasks
     reduceTags = map(lambda j:'reducer-to-%s-%s' % (outdir,reduceOutputs[j]), range(numReduceTasks))
     reduceQs = map(lambda j:Queue.Queue(), range(numReduceTasks))
     reducePipes = map(lambda j:makePipe("sort -k1,2 | "+reducer), range(numReduceTasks))
@@ -394,12 +412,19 @@ def mapreduce(indirList,outdir,mapper,reducer,numReduceTasks,pipeThread):
 def maponly(indirList,outdir,mapper,pipeThread):
     """Like mapreduce but for a mapper-only process."""
 
-    indirs,infiles = setupFiles(indirList,outdir)
+    indirs,infiles,outputToFile = setupFiles(indirList,outdir,-1)
     global TASK_STATS
 
     numMapTasks = len(infiles)
-    # names of the mapper tasks
-    mapOutputs = map(lambda i:'part%04d' % i, range(numMapTasks))
+    # mapper output locations
+    if outputToFile:
+        assert len(infiles)==1
+        head,tail = os.path.split(outdir)
+        outdir = head
+        mapOutputs = [tail]
+    else:
+        mapOutputs = map(lambda i:'part%04d' % i, range(numMapTasks))        
+    #names of the map tasks
     mapTags = map(lambda i:'mapper-from-%s-%s' % (indirs[i],infiles[i]), range(numMapTasks))
     # subprocesses for each mapper
     mapPipes = map(lambda i:makePipe(mapper), range(numMapTasks))
@@ -582,7 +607,7 @@ class FileOutputCollector(PipeOutputCollector):
             self.outdir = outdir
             self.outfile = outfile
         else:
-            self.fp = open(outdir+"/"+outfile, 'w')
+            self.fp = open(os.path.join(outdir,outfile),'w')
     def collect(self,str):
         if self.gpfs: 
             global FS
@@ -666,28 +691,44 @@ def acceptReduceInputs(numMapTasks,reduceQ,reducePipe):
 ####################
 # access input/output files for mapreduce
 
-def setupFiles(indirList,outdir):
-    """Returns parallel lists, indirs and infiles, where infiles is a list
-    of input files, and indirs is a parallel list if directories, so the
-    i-th mapper reads from indirs[i],infiles[i].  clear the output directory,
-    if needed. """
+def setupFiles(indirList,outdir,numReduceTasks):
+    """Returns a triple (indirs,infiles,outputToFileFlag), where indirs
+    and infiles are parallel lists: infiles is a list of input files,
+    and indirs is a parallel list if directories, so the i-th mapper
+    reads from indirs[i]/infiles[i].  Normally outputToFileFlag is
+    false, and the output directory will be created and cleared, if
+    necessary.  However, if the inputs are all files and
+    numReduceTasks is 1, then instead of creating a directory to hold
+    the outputs, output will be written to a file named 'outdir'.
+    """
     indirs = []
     infiles = []
+    if numReduceTasks<0: oneReduceTaskAndInputsAreFiles = (len(indirList)==1)
+    else: oneReduceTaskAndInputsAreFiles = (numReduceTasks==1)
     for dir in indirList:
         if GPFileSystem.inGPFS(dir):
             files = FS.listFiles(dir)
-        else:
+            oneReduceTaskAndInputsAreFiles = False
+        elif os.path.isdir(dir):
             files = [f for f in os.listdir(dir)]
-        infiles.extend(files)
-        indirs.extend([dir] * len(files))
+            infiles.extend(files)
+            indirs.extend([dir] * len(files))
+            oneReduceTaskAndInputsAreFiles = False
+        elif os.path.isfile(dir):
+            head,tail = os.path.split(dir)
+            indirs.append(head)
+            infiles.append(tail)
+        else:
+            assert False,"cannot handle input directory %s" % dir
     if outdir.startswith("gpfs:"):
         FS.rmDir(outdir)
     else:
-        if os.path.exists(outdir):
-            logging.warn('removing %s' % (outdir))
-            shutil.rmtree(outdir)
-        os.makedirs(outdir)
-    return indirs,infiles
+        if not oneReduceTaskAndInputsAreFiles:
+            if os.path.exists(outdir):
+                logging.warn('removing %s' % (outdir))
+                shutil.rmtree(outdir)
+            os.makedirs(outdir)
+    return indirs,infiles,oneReduceTaskAndInputsAreFiles
                       
 def getInput(indir,f):
     """Return the content of the input file at indir/f"""
@@ -697,7 +738,7 @@ def getInput(indir,f):
         logging.debug('loading lines from '+indir+"/"+f)
         inputString = cStringIO.StringIO()
         k = 0
-        for line in open(indir+"/"+f):
+        for line in open(os.path.join(indir,f)):
             inputString.write(line)
             k += 1
             if k%10000==0: logging.debug('reading %d lines from file %s/%s' % (k,indir,f))
@@ -715,6 +756,7 @@ from SocketServer import ThreadingMixIn
 import urlparse
 
 keepRunning = True
+serverPort = 8000
 
 class MRSHandler(BaseHTTPRequestHandler):
     
@@ -752,6 +794,7 @@ class MRSHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle a request."""
         global keepRunning
+        global serverPort
         global TASK_STATS
         try:
             p = urlparse.urlparse(self.path)
@@ -799,7 +842,7 @@ class MRSHandler(BaseHTTPRequestHandler):
             elif requestOp=="/report":
                 self._sendList(TASK_STATS.report(), html)
             elif requestOp=="/":
-                self._sendFile("Try browsing http://%s:%d/ls?html=1" % (self.server.server_name,1969),html)
+                self._sendFile("Try browsing http://%s:%d/ls?html=1" % (self.server.server_name,serverPort),html)
             elif requestOp=="/task":
                 try:
                     (clientHost,clientPort) = self.client_address
@@ -867,11 +910,12 @@ class ThreadingServer(ThreadingMixIn, HTTPServer):
     pass
 
 def runServer():
-    #to allow only access from local machine, use server_address = ('127.0.0.1', 1969)
+    global serverPort
+    #to allow only access from local machine, use server_address = ('127.0.0.1', serverPort)
     #thid will allow access from anywhere....
-    server_address = ('0.0.0.0', 1969)    
+    server_address = ('0.0.0.0', serverPort)    
     httpd = ThreadingServer(server_address, MRSHandler)
-    startMsg = 'http server started on http://%s:%d/ls&html=1 at %s' % (httpd.server_name,1969,time.strftime('%X %x'))
+    startMsg = 'http server started on http://%s:%d/ls&html=1 at %s' % (httpd.server_name,serverPort,time.strftime('%X %x'))
     logging.info(startMsg)
     print startMsg
     while keepRunning:
@@ -884,7 +928,8 @@ import httplib
  
 def sendRequest(command,quiet=False,timeout=None):
     """Send a request to the server."""
-    http_server = "127.0.0.1:1969"
+    global serverPort
+    http_server = "127.0.0.1:%d" % serverPort
     conn = httplib.HTTPConnection(http_server,timeout=timeout)
     conn.request("GET", command)
     response = conn.getresponse()
@@ -936,12 +981,14 @@ def usage():
 
 if __name__ == "__main__":
 
-    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report", "probe", "async=",
+    argspec = ["serve", "send=", "shutdown", "task", "help", "fs", "report", "probe", "async=", "port=",
                "input=", "output=", "mapper=", "reducer=", "numReduceTasks=", "inputs=", ]
     optlist,args = getopt.getopt(sys.argv[1:], 'x', argspec)
     optdict = dict(optlist)
     #print optdict,args
     
+    serverPort = int(optdict.get("port",8000))
+
     if "--serve" in optdict:
         # log server to a file, since it runs in the background...
         logging.basicConfig(filename="server.log",level=logging.INFO)

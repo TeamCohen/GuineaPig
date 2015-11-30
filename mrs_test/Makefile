@@ -1,11 +1,10 @@
-MRS=pypy ../mrs_gp_v4.py
-#MRS=pypy ../mrs_gp.py
+MRS=pypy ../mrs_gp.py
 K=5
 ASYNC = 0
 
 #
 clean: 
-	rm -rf /tmp/test-copy parallel-events.txt
+	rm -rf tmp/* parallel-events.txt
 
 backup:
 	cp ../mrs_gp_v4.py ../backup/`date "+%H:%M:%S"`-mrs_gp_v4.py
@@ -14,38 +13,38 @@ backup:
 
 shard-sample:
 
-	time  $(MRS) --input unsharded-sample --output /tmp/sample-copy --mapper cat --reducer cat --numReduceTasks $(K)
+	time  $(MRS) --input unsharded-sample --output tmp/sample-copy --mapper cat --reducer cat --numReduceTasks $(K)
 	echo should be the same
 	sort unsharded-sample/* | sum
-	sort /tmp/sample-copy/* | sum
+	sort tmp/sample-copy/* | sum
 
 copy:
 	$(MRS) --serve &
 	sleep 1
-	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
+	$(MRS) --task --input test --output tmp/test-copy --mapper cat
 	$(MRS) --shutdown
 	echo should be the same
-	sum test/* /tmp/test-copy/*
+	sum test/* tmp/test-copy/*
 
 copy2:
 	$(MRS) --serve &
 	sleep 1
-	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
-	$(MRS) --task --input test --output /tmp/test-copy --mapper cat
+	$(MRS) --task --input test --output tmp/test-copy --mapper cat
+	$(MRS) --task --input test --output tmp/test-copy --mapper cat
 	$(MRS) --shutdown
 	echo should be the same
-	sum test/* /tmp/test-copy/*
+	sum test/* tmp/test-copy/*
 
 shard:
 	$(MRS) --serve &
 	sleep 1
-	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
+	$(MRS) --task --input test --output tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
 	$(MRS) --shutdown
 	echo should have 3 files
-	ls /tmp/test-copy
+	ls tmp/test-copy
 	echo should be the same
 	sort test/* | sum
-	sort /tmp/test-copy/* | sum
+	sort tmp/test-copy/* | sum
 
 up:
 	$(MRS) --serve 
@@ -54,22 +53,22 @@ down:
 	$(MRS) --shutdown
 
 shard-fixed-server:
-	$(MRS) --task --input test --output /tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
+	$(MRS) --task --input test --output tmp/test-copy --mapper cat --reducer cat --numReduceTasks 3
 
 reshard: 
 	make -B shard
 	$(MRS) --serve &
 	sleep 1
-	$(MRS) --task --input /tmp/test-copy --output /tmp/test-copy2 --mapper cat --reducer cat --numReduceTasks 2
+	$(MRS) --task --input tmp/test-copy --output tmp/test-copy2 --mapper cat --reducer cat --numReduceTasks 2
 	$(MRS) --shutdown
 	echo should have 3 files
-	ls /tmp/test-copy
+	ls tmp/test-copy
 	echo should have 2 files
-	ls /tmp/test-copy2
+	ls tmp/test-copy2
 	echo should be the same
 	sort test/* | sum
-	sort /tmp/test-copy/* | sum
-	sort /tmp/test-copy2/* | sum
+	sort tmp/test-copy/* | sum
+	sort tmp/test-copy2/* | sum
 
 # file-memory 
 
@@ -98,21 +97,21 @@ roundtrip:
 	$(MRS) --serve &
 	sleep 1
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat 
-	$(MRS) --task --output /tmp/test-copy --input gpfs:test-copy --mapper cat
+	$(MRS) --task --output tmp/test-copy --input gpfs:test-copy --mapper cat
 	$(MRS) --shutdown
 	echo should be the same
 	sort test/* | sum
-	sort /tmp/test-copy/* | sum
+	sort tmp/test-copy/* | sum
 
 roundtrip-reshard:
 	$(MRS) --serve &
 	sleep 1
 	$(MRS) --task --input test --output gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 3
-	$(MRS) --task --output /tmp/test-copy --input gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 2
+	$(MRS) --task --output tmp/test-copy --input gpfs:test-copy --mapper cat --reducer cat --numReduceTasks 2
 	$(MRS) --shutdown
 	echo should be the same
 	sort test/* | sum
-	sort /tmp/test-copy/* | sum
+	sort tmp/test-copy/* | sum
 
 parallel-events: 
 	$(MRS) --serve &
