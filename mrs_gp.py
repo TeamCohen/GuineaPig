@@ -686,9 +686,12 @@ def setupFiles(indirList,outdir,numReduceTasks):
     single output, it will also be a file.
     """
     #clear space/make directory for output, if necessary
-    if os.path.exists(outdir):
+    if os.path.exists(outdir):  
         logging.warn('removing %s' % (outdir))
-        shutil.rmtree(outdir)
+        if os.path.isdir(outdir):
+            shutil.rmtree(outdir)
+        else:
+            os.remove(outdir)
 
     indirs = []
     infiles = []

@@ -105,18 +105,18 @@ class MRSCompiler(MRCompiler):
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
         """A map-reduce job with one input."""
         p = task.reduceParallel(gp)
-        return [ "%s --input %s --output %s --mapper '%s'  --numReduceTasks %d --reducer '%s'" \
-                 % (self.mrsCommand,src,dst,mapCom,p,reduceCom) ]
+        return [ "%s --input %s --output %s --numReduceTasks %d --mapper '%s'  --reducer '%s'" \
+                 % (self.mrsCommand,src,dst,p,mapCom,reduceCom) ]
 
     def joinCommands(self,task,gp,mapComs,reduceCom,srcs,midpoint,dst):
         """A map-reduce job with several inputs."""
         p = task.reduceParallel(gp)
-        def midi(i): return midpoint + '-' + str(i)
+        def mid(i): return midpoint + '-' + str(i)
         subplan = []
         for i in range(len(srcs)):
             subplan.append("%s --input %s --output %s --mapper '%s'" \
                            % (self.mrsCommand,srcs[i],mid(i),mapComs[i]))
         allMidpoints = ",".join([mid(i) for i in range(len(srcs))])
-        subplan.append("%s --inputs %s --output %s --mapper cat --numReduceTasks %d --reducer '%s'" \
+        subplan.append("%s --inputs %s --output %s --numReduceTasks %d --mapper cat --reducer '%s'" \
                        % (self.mrsCommand,allMidpoints,dst,p,reduceCom))
         return subplan

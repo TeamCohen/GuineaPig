@@ -4,7 +4,7 @@ ASYNC = 0
 
 #
 clean: 
-	rm -rf tmp/* parallel-events.txt
+	rm -rf tmp tmp.txt sharded parallel-events.txt server.log test test2 gpig_views
 
 backup:
 	cp ../mrs_gp_v4.py ../backup/`date "+%H:%M:%S"`-mrs_gp_v4.py
