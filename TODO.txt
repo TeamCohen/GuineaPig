@@ -14,7 +14,9 @@ TODO for mrs_gp.py:
  - check if input file is a directory or not, and write to a file, not directory, if --numReduceTasks = 1,
    so it can be used with regular gp - done
 
- - test with gpig, test on processes with errors, ....
+ - test with gpig - done
+ - fix - gpig prefixes dirs in gpfs with / because it likes viewdir/foo.gp
+ - test on processes with errors, ....
  - os.times() - can this show children's time/CPU pct so I can see actual load?
  - server timeout, for security, in case I leave it running...?
  - add an 'abort task' method for server...? or maybe kill client thread?

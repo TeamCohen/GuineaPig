@@ -100,6 +100,7 @@ class MRSCompiler(MRCompiler):
     def simpleMapCommands(self,task,gp,mapCom,src,dst):
         """A map-only job with zero or one inputs."""
         assert src,'undefined src for this view? you may be using Wrap with target:mrs'
+        # parallelism is ignored for map-only tasks
         return [ "%s --input %s --output %s --mapper '%s'" % (self.mrsCommand,src,dst,mapCom) ]
         
     def simpleMapReduceCommands(self,task,gp,mapCom,reduceCom,src,dst):
