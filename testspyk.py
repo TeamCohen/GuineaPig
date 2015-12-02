@@ -1,3 +1,5 @@
+# tests for spyk
+
 import spyk
 
 if __name__ == "__main__" :

@@ -1,3 +1,5 @@
+# early version of mrs_gp.py
+
 import getopt
 import sys
 import os

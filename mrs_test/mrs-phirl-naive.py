@@ -1,7 +1,7 @@
 from guineapig import *
 import gpextras
 
-# a non-trivial GineaPig program
+# a non-trivial GineaPig program - modified to work with mrs
 
 import sys
 import math

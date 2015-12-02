@@ -2,6 +2,8 @@ from guineapig import *
 import sys
 import gpextras
 
+# wordcount modified for mrs
+
 # supporting routines can go here
 def tokens(line): 
     for tok in line.split(): 

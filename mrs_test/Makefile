@@ -1,3 +1,5 @@
+# the targets here are basically interactive tests for mrs_gp.py
+
 MRS=pypy ../mrs_gp.py
 K=5
 ASYNC = 0

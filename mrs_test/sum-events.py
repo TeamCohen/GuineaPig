@@ -1,3 +1,5 @@
+# used with streamNaiveBayesLearner to get event counts
+
 import sys
 import logging
 

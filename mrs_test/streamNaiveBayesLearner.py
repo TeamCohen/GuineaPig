@@ -1,3 +1,5 @@
+#streaming naive bayes
+
 import sys
 import math
 import logging
