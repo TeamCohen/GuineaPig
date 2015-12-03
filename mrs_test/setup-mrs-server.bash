@@ -3,5 +3,5 @@ export GPHOME=`(cd ..;pwd)`
 export PYTHONPATH=$GPHOME
 export GP_MRS_COMMAND="python $GPHOME/mrs_gp.py --task"
 rm -f server.log
-python $GPHOME/mrs_gp.py --serve &
+pypy $GPHOME/mrs_gp.py --serve &
 

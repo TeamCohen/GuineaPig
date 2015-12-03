@@ -122,7 +122,7 @@ parallel-events:
 	time  $(MRS) --task --input unsharded --output gpfs:sharded --mapper cat --reducer cat --numReduceTasks $(K)
 	echo training naive bayes in parallel
 	time $(MRS) --task --input gpfs:sharded --output gpfs:events --numReduceTasks $(K) --async $(ASYNC) \
-		--mapper 'python streamNaiveBayesLearner.py --streamTrain 100' \
+		--mapper 'python streamNaiveBayesLearner.py --streamTrain 0' \
 		--reducer 'python sum-events.py'
 	echo time $(MRS) --task --input gpfs:sharded --output gpfs:events --mapper 'python streamNaiveBayesLearner.py --streamTrain 100' --async $(ASYNC)
 	echo export
