@@ -24,14 +24,10 @@ import urllib
 # just files in directories.  This combines multi-threading and
 # multi-processing.
 #
-# TODO:
-#  document --inputs
-#  test/eval on servers and with gp
-#
 # Gotchas/bugs:
 #   - threading doesn't work right in jython, and doesn't help
 #   much in cpython.  best interpreter is pypy, due to lack
-#   of GIL. TODO: confirm this for v4.
+#   of GIL. 
 #  - if you use /afs/ as file store the server seems to 
 #   leave some sort of lock file around which make deletion
 #   impossible while the server is running
@@ -59,6 +55,9 @@ import urllib
 class MRS(object):
     VERSION = "1.4.1"
     COPYRIGHT = '(c) William Cohen 2015'
+
+#SAFE_PREFIX=""    #disables the relative-path check
+SAFE_PREFIX="./"   #prepending to paths ensures that all paths are relative
 
 ##############################################################################
 #
@@ -241,6 +240,11 @@ class TaskStats(object):
             buf.extend([' %-7s summary: %d/%d finished/started %s min/max time %.3f/%.3f' % \
                         (k,self.numFinished[k],self.numStarted[k],progressBar,minTime,maxTime)])
         now = time.time()
+        (user,system,childuser,childsystem,unused)=os.times()
+        total = sum((user,system,childuser,childsystem))
+        elapsed = now - self.startTime['__top level task']
+        buf.extend([' CPU time: user/system main: %.1fs/%.1fs child: %.1fs/%.1fs elapsed: %.1f CPU%% %.1f' \
+                    % (user,system,childuser,childsystem,elapsed,100*total/elapsed)])
         for k in sorted(self.startTime.keys()):
             if k in self.endTime:
                 line = ' %-40s: finished in %.3f sec' % (k,self.endTime[k]-self.startTime[k])
@@ -583,7 +587,7 @@ class FileOutputCollector(PipeOutputCollector):
             self.outdir = outdir
             self.outfile = outfile
         else:
-            self.fp = open(os.path.join("./"+outdir,outfile),'w')
+            self.fp = open(os.path.join(SAFE_PREFIX+outdir,outfile),'w')
     def collect(self,str):
         if self.gpfs: 
             global FS
@@ -732,7 +736,7 @@ def getInput(indir,f):
     else:
         inputString = cStringIO.StringIO()
         k = 0
-        for line in open("./"+os.path.join(indir,f)):
+        for line in open(SAFE_PREFIX+os.path.join(indir,f)):
             inputString.write(line)
             k += 1
         return inputString.getvalue()
@@ -914,7 +918,7 @@ def runServer():
         httpd.handle_request()
     logging.info(startMsg + ' has been shut down')
 
-# client
+# client, for submitting command-line jobs to the server
 
 import httplib
  

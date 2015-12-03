@@ -10,7 +10,6 @@ the working version.
 
 TODO for mrs_gp.py:
  - test on processes with errors, ....
- - os.times() - can this show children's time/CPU pct so I can see actual load?
  - server timeout, for security, in case I leave it running...?
  - add an 'abort task' method for server...? or maybe kill client thread?
 
