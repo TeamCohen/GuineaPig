@@ -89,15 +89,16 @@ class LogProgress(Log):
 
 class MRSCompiler(MRCompiler):
     """Compile tasks to commands that are executable on most Unix shells,
-    with the mrs_gp.py program.
+    with the mrs_gp.py program.  To use this compiler you need to
+    call planner.registerCompiler('mrs_go',gpextras.MRSCompiler)
     """
 
     def __init__(self):
-        self.mrsCommand = os.environ.get('GP_MRS_COMMAND','mrs_gp')
+        self.mrsCommand = os.environ.get('GP_MRS_COMMAND','python -m mrs_gp')
 
     def distributeCommands(self,task,gp,maybeRemoteCopy,localCopy):
         """Distribute the remote copy to the local directory."""
-        return ['cp -f %s %s || echo warning: the copy failed!' % (maybeRemoteCopy,localCopy)]
+        return ['%s --fs getmerge %s > %s|| echo warning: the copy failed!' % (self.mrsCommand,maybeRemoteCopy,localCopy)]
 
     def simpleMapCommands(self,task,gp,mapCom,src,dst):
         """A map-only job with zero or one inputs."""

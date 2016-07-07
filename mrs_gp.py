@@ -911,7 +911,7 @@ def runServer():
     #thid will allow access from anywhere....
     server_address = ('0.0.0.0', serverPort)    
     httpd = ThreadingServer(server_address, MRSHandler)
-    startMsg = 'http server started on http://%s:%d/ls&html=1 at %s' % (httpd.server_name,serverPort,time.strftime('%X %x'))
+    startMsg = 'http server started on http://%s:%d/ls?html=1 at %s' % (httpd.server_name,serverPort,time.strftime('%X %x'))
     logging.info(startMsg)
     print startMsg
     while keepRunning:
@@ -1002,11 +1002,9 @@ if __name__ == "__main__":
             print "server is",("running" if serverIsResponsive() else "down")
         elif "--report" in optdict:
             sendRequest("/report")
-        elif "--task" in optdict:
-            del optdict['--task']
-            sendRequest("/task?" + urllib.urlencode(optdict))
         elif "--help" in optdict:
             usage()
+        # put this before --task because I want --task --fs to act like --fs
         elif "--fs" in optdict:
             if not args: 
                 usage()
@@ -1018,6 +1016,9 @@ if __name__ == "__main__":
                 elif len(args)>3: request += "&n="+args[3]
                 #print "request: "+request
                 sendRequest(request)
+        elif "--task" in optdict:
+            del optdict['--task']
+            sendRequest("/task?" + urllib.urlencode(optdict))
         else:
             if (('--inputs' in optdict) or ('--input' in optdict)) and ('--output' in optdict):
                 performTask(optdict)
