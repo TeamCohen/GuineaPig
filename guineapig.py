@@ -21,11 +21,11 @@ import csv
 class GPig(object):
     """Collection of utilities for Guinea Pig."""
 
-    SORT_COMMAND = 'LC_COLLATE=C sort'  # use standard ascii ordering, not locale-specific one
+    SORT_COMMAND = 'LC_ALL=C sort'      # use standard ascii ordering, not locale-specific one
     HADOOP_LOC = 'hadoop'               # assume hadoop is on the path at planning time
     MY_LOC = 'guineapig.py'             # the name of this file
-    VERSION = '1.3.4'
-    COPYRIGHT = '(c) William Cohen 2014,2015'
+    VERSION = '1.3.5'
+    COPYRIGHT = '(c) William Cohen 2014-2016'
 
     #Global options for Guinea Pig can be passed in with the --opts
     #command-line option, and these are the default values
@@ -659,10 +659,10 @@ class Distinct(MapReduce):
         for line in sys.stdin:
             valStr = line.strip()
             val = self.planner._serializer.fromString(valStr)
-            if val != lastval and lastval: 
+            if val != lastval and lastval is not None: 
                 yield lastval
             lastval = val
-        if lastval: 
+        if lastval is not None: 
             yield lastval
 
     def explanation(self):
