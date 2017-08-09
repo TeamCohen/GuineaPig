@@ -628,7 +628,7 @@ class Flatten(Transformation):
     """ Like ReplaceEach, but output of 'by' is an iterable, and all
     results will be returned. """
 
-    def __init__(self,inner=None,by=None):
+    def __init__(self,inner=None,by=lambda x:x):
         Transformation.__init__(self,inner)
         self.flattenBy = by
 

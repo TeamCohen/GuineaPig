@@ -64,6 +64,11 @@ run-phirl:
 	python phirl-naive.py --store look
 	sort -gr gpig_views/look.gp | head
 	sort -g gpig_views/look.gp | head
+	wc gpig_views/look.gp 
+	python phirl-improved.py --store look
+	sort -gr gpig_views/look.gp | head
+	sort -g gpig_views/look.gp | head
+	wc gpig_views/look.gp 
 
 run-add-ids:
 	python add-ids.py --store result
