@@ -13,7 +13,7 @@ tar: update
 	mv ../tutorial.tgz .
 
 upload: tar
-	scp tutorial.tgz raff.ml.cmu.edu:~/afs-home/www/10-605/gpigtut.tgz
+	scp tutorial.tgz tanka.ml.cmu.edu:~/www/10-605/gpigtut.tgz
 
 all-runs: run-wordcount run-ntup-wordcount run-prefcount run-wordcmp run-wordprob run-multi run-phirl run-reuse check-phirl run-add-ids
 	echo all tests run, did you see any problems\?
