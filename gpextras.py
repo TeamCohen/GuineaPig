@@ -82,6 +82,27 @@ class LogProgress(Log):
         Log.__init__(self, inner=inner, logfun=logprogress)
 
 
+def MapsideJoin(jinForLargeView, jinForSmallView):
+    """ A map-side join using Augment
+    """
+    def smallViewLoader(view):
+        smallViewDict = {}
+        for line in open(view.distributableFile()):
+            row = view.planner._serializer.fromString(line.strip())            
+            key = (jinForSmallView.joinBy)(row)
+            smallViewDict[key] = row
+        return smallViewDict
+    def joiner((rowFromLargeView,smallViewDict)):
+        key = (jinForLargeView.joinBy)(rowFromLargeView)
+        if key in smallViewDict:
+            return [(rowFromLargeView,smallViewDict[key])]
+        else:
+            return []
+      
+    return Augment( jinForLargeView.view, sideview=jinForSmallView.view, loadedBy=smallViewLoader) \
+        | Flatten( by=joiner )
+
+
 ##############################################################################
 # extension to use mrs_gp, a local map-reduce for streaming intended
 # mainly for use on ramdisks
