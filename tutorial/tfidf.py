@@ -16,6 +16,7 @@ class TFIDF(Planner):
     docFreq = Distinct(data) \
         | Group(by=lambda (docid,term):term, retaining=lambda(docid,term):docid, reducingTo=ReduceToCount())
 
+    # compute the number of documents
     docIds = Map(data, by=lambda (docid,term):docid) | Distinct()
     ndoc = Group(docIds, by=lambda row:'ndoc', reducingTo=ReduceToCount())
 

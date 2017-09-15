@@ -60,7 +60,9 @@ class Phirl(Planner):
     # applied only to terms in the 'target' relation
 
     # 1) pick only top terms in each document
-    topTermsInEachDocForRel1 = Group(rel1Docs, by=lambda(rel,doc,term,weight):doc, retaining=lambda(rel,doc,term,weight):(weight,term)) \
+    topTermsInEachDocForRel1 = Group(rel1Docs, 
+                                     by=lambda(rel,doc,term,weight):doc, 
+                                     retaining=lambda(rel,doc,term,weight):(weight,term)) \
         | ReplaceEach(by=lambda(doc,termList):sorted(termList,reverse=True)[0:NUM_TOP_TERMS]) \
         | Flatten(by=lambda x:x) | ReplaceEach(by=lambda(weight,term):term)
 
@@ -69,7 +71,8 @@ class Phirl(Planner):
         | ReplaceEach(by=lambda(rel,doc,term,weight):term)
 
     # 3) pick terms with some maximal DF
-    lowDocFreqTerms = Filter(docFreq,by=lambda(rel,term,df):df<=MAX_TERM_DF) | ReplaceEach(by=lambda(rel,term,df):term)
+    lowDocFreqTerms = Filter(docFreq,by=lambda(rel,term,df):df<=MAX_TERM_DF) \
+        | ReplaceEach(by=lambda(rel,term,df):term)
 
     # terms we will join on should pass all of the tests above
     usefulTerms = Join( Jin(topTermsInEachDocForRel1), Jin(highWeightTermsForRel1)) | ReplaceEach(by=lambda(term1,term2):term1) \
@@ -79,10 +82,17 @@ class Phirl(Planner):
     # a) since we're not considering all possible index terms, some pairs with non-zero similarity could be missed
     # b) since we're not adding up weight products for all terms, the score for a pair can be under-counted
 
-    softjoin = Join( Jin(rel1Docs,by=lambda(rel,doc,term,weight):term), Jin(usefulTerms)) | ReplaceEach(by=lambda(rel1doc,term):rel1doc) \
-        | JoinTo( Jin(rel2Docs,by=lambda(rel,doc,term,weight):term), by=lambda(rel,doc,term,weight):term)\
-        | ReplaceEach(by=lambda((rel1,doc1,term,weight1),(rel2,doc2,term_,weight2)): (doc1,doc2,weight1*weight2)) \
-        | Group(by=lambda(doc1,doc2,p):(doc1,doc2), reducingTo=ReduceTo(float,lambda accum,(doc1,doc2,p): accum+p)) \
+    softjoin = Join( Jin(rel1Docs,by=lambda(rel,doc,term,weight):term), 
+                     Jin(usefulTerms)) \
+        | ReplaceEach(by=lambda(rel1doc,term):rel1doc) \
+        | JoinTo( Jin(rel2Docs,by=lambda(rel,doc,term,weight):term), 
+                  by=lambda(rel,doc,term,weight):term)\
+        | ReplaceEach( \
+            by=lambda((rel1,doc1,term,weight1),(rel2,doc2,term_,weight2)): \
+                       (doc1,doc2,weight1*weight2)) \
+        | Group(by=lambda(doc1,doc2,p):(doc1,doc2), \
+                retaining=lambda accum,(doc1,doc2,p):p, \
+                reducingTo=ReduceToSum()) \
         | ReplaceEach(by=lambda((doc1,doc2),sim):(doc1,doc2,sim))
 
     # get the strongly similar pairs

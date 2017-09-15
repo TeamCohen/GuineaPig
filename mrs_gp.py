@@ -709,7 +709,7 @@ def setupFiles(indirList,outdir,numReduceTasks):
             indirs.append(inhead)
             infiles.append(intail)
         else:
-            assert False,'illegal input location %s' % dir
+            assert False,'illegal input location %r from working dir %r' % (dir,os.environ['PWD'])
 
     numActualReduceTasks = len(infiles) if numReduceTasks<0 else numReduceTasks
     if inputsAreFiles and numActualReduceTasks==1 and not GPFileSystem.inGPFS(outdir):
