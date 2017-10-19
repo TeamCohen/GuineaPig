@@ -91,7 +91,7 @@ class Phirl(Planner):
             by=lambda((rel1,doc1,term,weight1),(rel2,doc2,term_,weight2)): \
                        (doc1,doc2,weight1*weight2)) \
         | Group(by=lambda(doc1,doc2,p):(doc1,doc2), \
-                retaining=lambda accum,(doc1,doc2,p):p, \
+                retaining=lambda (doc1,doc2,p):p, \
                 reducingTo=ReduceToSum()) \
         | ReplaceEach(by=lambda((doc1,doc2),sim):(doc1,doc2,sim))
 

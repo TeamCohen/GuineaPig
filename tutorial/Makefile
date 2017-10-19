@@ -6,6 +6,7 @@ clean:
 	rm -rf gpig_views
 	rm -f total.gp
 	rm -f *.pyc
+	rm -f tmp-pr-graph.txt
 
 tar: update
 	echo created on `date` > marker.txt
@@ -84,4 +85,6 @@ check-phirl: run-phirl
 	sort -gr gpig_views/look.gp > phirl-actual-output.txt
 	diff phirl-actual-output.txt phirl-expected-output.txt
 
-
+run-pagerank:
+	python pagerank.py
+	head tmp-pr-graph.txt 
