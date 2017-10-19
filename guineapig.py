@@ -129,7 +129,7 @@ class Jin(object):
 class ReduceTo(object):
     """An object x that can be the argument of a reducingTo=x parameter in
     a Group view.  Basetype is a function f such that f() returns the
-    initial value of the accumuator, and 'by' is a function that
+    initial value of the accumulator, and 'by' is a function that
     maps one accumulator and a single new value to the next accumulator.  
     """
     def __init__(self,baseType,by=lambda accum,val:accum+val):

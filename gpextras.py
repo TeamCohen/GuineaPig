@@ -83,7 +83,7 @@ class LogProgress(Log):
 
 
 def MapsideJoin(jinForLargeView, jinForSmallView):
-    """ A map-side join using Augment
+    """ A map-side join implementation using Augment
     """
     def smallViewLoader(view):
         smallViewDict = {}
