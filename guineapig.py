@@ -1,5 +1,5 @@
 ##############################################################################
-# (C) Copyright 2014, 2015 William W. Cohen.  All rights reserved.
+# (C) Copyright 2014-2018 William W. Cohen.  All rights reserved.
 ##############################################################################
 
 import sys
@@ -24,8 +24,8 @@ class GPig(object):
     SORT_COMMAND = 'LC_ALL=C sort'  # use standard ascii ordering, not locale-specific one
     HADOOP_LOC = 'hadoop'               # assume hadoop is on the path at planning time
     MY_LOC = 'guineapig.py'             # the name of this file
-    VERSION = '1.3.6'
-    COPYRIGHT = '(c) William Cohen 2014-2016'
+    VERSION = '1.3.7'
+    COPYRIGHT = '(c) William Cohen 2014-2018'
 
     #Global options for Guinea Pig can be passed in with the --opts
     #command-line option, and these are the default values
@@ -36,10 +36,12 @@ class GPig(object):
     envjar = os.environ.get('GP_STREAMJAR', defaultJar)
     defaultViewDir = 'gpig_views'
     envViewDir = os.environ.get('GP_VIEWDIR',defaultViewDir )
+    pythonCommand = os.environ.get('GP_PYTHON_COMMAND','python')
     DEFAULT_OPTS = {'streamJar': envjar,
                     'parallel':5,
                     'target':'shell',
                     'echo':0,
+                    'pythonCommand':pythonCommand,
                     'viewdir': envViewDir,
                     }
     #These are the types of each option that has a non-string value
@@ -1145,11 +1147,11 @@ class MRCompiler(object):
 
     def _coreCommand(self,step,gp):
         """Python command to call an individual plan step."""
-        return 'python %s --view=%s --do=%s' % (gp._gpigSourceFile,step.view.tag,step.whatToDo) + self.__coreCommandOptions(step,gp)
+        return '%s %s --view=%s --do=%s' % (gp.opts['pythonCommand'],gp._gpigSourceFile,step.view.tag,step.whatToDo) + self.__coreCommandOptions(step,gp)
 
     def _ithCoreCommand(self,step,gp,i):
         """Like _coreCommand but allows index parameter to 'do' option"""
-        return 'python %s --view=%s --do=%s.%d' % (gp._gpigSourceFile,step.view.tag,step.whatToDo,i) + self.__coreCommandOptions(step,gp)
+        return '%s %s --view=%s --do=%s.%d' % (gp.opts['pythonCommand'],gp._gpigSourceFile,step.view.tag,step.whatToDo,i) + self.__coreCommandOptions(step,gp)
 
     def __coreCommandOptions(self,step,gp):
         if not gp.param:
@@ -1352,8 +1354,8 @@ class Planner(object):
             logging.basicConfig(level=logging.INFO)
         logging.info('GuineaPig v%s %s' % (GPig.VERSION,GPig.COPYRIGHT))
 
-        #Hadoop needs to know where to give the main script file, as
-        #well as the guineapig.py file used here
+        #Hadoop needs to know where to find the main script file, the
+        #python interpreter, and the guineapig.py file (this file)
         self._shippedFiles = []
         self._gpigSourceFile = sys.argv[0]
         self.ship(GPig.MY_LOC)
@@ -1671,14 +1673,16 @@ class Planner(object):
                 print ' --%s VIEW: %s'% (a,usageHint[a])
             print 'The --list subcommand lists possible VIEWs defined by this program.'
             print ''
-            print 'OPTIONS are specified as "--opts key:value,...", where legal keys for "opts", with default values, are:'
+            print 'OPTIONS are specified as "--opts key:value,...", where legal keys for "opts",'
+            print 'with their default values, are:'
             for (key,val) in GPig.DEFAULT_OPTS.items():
-                print '  %s:\t%s' % (key,str(val))
-            print 'The environment variables GP_STREAMJAR and GP_VIEWDIR, if defined, set two of these default values.'
-            print 'Options affect Guinea Pig\'s default behavior.' 
+                print '  %s: %s' % (key,str(val))
+            print 'These OPTIONS affect Guinea Pig\'s default behavior. The environment variables'
+            print 'GP_STREAMJAR, GP_VIEWDIR, and GP_PYTHON_COMMAND, if defined, affect these defaults.'
             print ''
-            print 'PARAMS are specified as "--params key:value,..." and the associated dictionary is accessible to' 
-            print 'user programs via the function GPig.getArgvParams(). Params are used as program-specific inputs.'
+            print 'PARAMS are specified as "--params key:value,..." and the associated dictionary' 
+            print 'is accessible to user programs via the function GPig.getArgvParams(). PARAMS should'
+            print 'be used as program-specific inputs.'
             print ''
             print 'Values in the "opts" and "params" key/value pairs are assumed to be URL-escaped.  (Note: %3A escapes a colon.)'
             print ''
